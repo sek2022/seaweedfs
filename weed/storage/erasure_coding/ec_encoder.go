@@ -22,7 +22,10 @@ const (
 	ParityShardsCount           = 4
 	TotalShardsCount            = DataShardsCount + ParityShardsCount
 	ErasureCodingLargeBlockSize = 1024 * 1024 * 1024 // 1GB
-	ErasureCodingSmallBlockSize = 1024 * 1024        // 1MB
+	ErasureCodingSmallBlockSize = 1024 * 1024
+	LargestBufferSize           = 8 * 1024 * 1024 // 8MB
+	MediumBufferSize            = 1024 * 1024     // 1MB
+	SmallBufferSize             = 256 * 1024
 )
 
 // UploadSortedFileFromIdx generates .ecx file from existing .idx file
@@ -102,11 +105,11 @@ func WriteSortedFileFromIdx(baseFileName string, ext string) (e error) {
 
 // UploadEcFiles generates .ec00 ~ .ec13 files
 func UploadEcFiles(baseFileName string, clients map[uint32]volume_info.UploadFileClient, collection string, volumeId uint32) error {
-	return generateEcFiles(baseFileName, 256*1024, ErasureCodingLargeBlockSize, ErasureCodingSmallBlockSize, clients, collection, volumeId)
+	return generateEcFiles(baseFileName, LargestBufferSize, ErasureCodingLargeBlockSize, ErasureCodingSmallBlockSize, clients, collection, volumeId)
 }
 
 func RebuildEcFiles(baseFileName string) ([]uint32, error) {
-	return generateMissingEcFiles(baseFileName, 256*1024, ErasureCodingLargeBlockSize, ErasureCodingSmallBlockSize)
+	return generateMissingEcFiles(baseFileName, LargestBufferSize, ErasureCodingLargeBlockSize, ErasureCodingSmallBlockSize)
 }
 
 func ToExt(ecIndex int) string {
@@ -170,6 +173,8 @@ func encodeData(file *os.File, enc reedsolomon.Encoder, startOffset, blockSize i
 	if bufferSize == 0 {
 		glog.Fatal("unexpected zero buffer size")
 	}
+
+	//fmt.Printf("bufferSize:%d \n", bufferSize)
 
 	batchCount := blockSize / bufferSize
 	if blockSize%bufferSize != 0 {
@@ -281,12 +286,6 @@ func encodeDatFile(remainingSize int64, baseFileName string, bufferSize int, lar
 		buffers[i] = make([]byte, bufferSize)
 	}
 
-	//outputs, err := openEcClients(baseFileName, ecIds)
-	//defer closeEcFiles(outputs)
-	//if err != nil {
-	//	return fmt.Errorf("failed to open ec files %s: %v", baseFileName, err)
-	//}
-
 	for remainingSize > largeBlockSize*DataShardsCount {
 		err = encodeData(file, enc, processedSize, largeBlockSize, buffers, clients, collection, volumeId)
 		if err != nil {
@@ -295,7 +294,18 @@ func encodeDatFile(remainingSize int64, baseFileName string, bufferSize int, lar
 		remainingSize -= largeBlockSize * DataShardsCount
 		processedSize += largeBlockSize * DataShardsCount
 	}
+	bufferSize = MediumBufferSize
+	for i := range buffers {
+		buffers[i] = make([]byte, bufferSize)
+	}
 	for remainingSize > 0 {
+		if remainingSize < smallBlockSize*DataShardsCount {
+			bufferSize = SmallBufferSize
+			for i := range buffers {
+				buffers[i] = make([]byte, bufferSize)
+			}
+		}
+
 		err = encodeData(file, enc, processedSize, smallBlockSize, buffers, clients, collection, volumeId)
 		if err != nil {
 			return fmt.Errorf("failed to encode small chunk data: %v", err)
