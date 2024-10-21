@@ -140,6 +140,9 @@ master:
   # Annotations to be added to the master pods
   podAnnotations: {}
 
+  # Annotations to be added to the master resources
+  annotations: {}
+
   ## Set podManagementPolicy
   podManagementPolicy: Parallel
 
@@ -165,6 +168,11 @@ master:
               app.kubernetes.io/instance: {{ .Release.Name }}
               app.kubernetes.io/component: master
           topologyKey: kubernetes.io/hostname
+
+  # Topology Spread Constraints Settings
+  # This should map directly to the value of the topologySpreadConstraints
+  # for a PodSpec. By Default no constraints are set.
+  topologySpreadConstraints: {}
 
   # Toleration Settings for master pods
   # This should be a multi-line string matching the Toleration array
@@ -405,6 +413,9 @@ volume:
   # Annotations to be added to the volume pods
   podAnnotations: {}
 
+  # Annotations to be added to the volume resources
+  annotations: {}
+
   ## Set podManagementPolicy
   podManagementPolicy: Parallel
 
@@ -420,6 +431,11 @@ volume:
               app.kubernetes.io/instance: {{ .Release.Name }}
               app.kubernetes.io/component: volume
           topologyKey: kubernetes.io/hostname
+
+  # Topology Spread Constraints Settings
+  # This should map directly to the value of the topologySpreadConstraints
+  # for a PodSpec. By Default no constraints are set.
+  topologySpreadConstraints: {}
 
   # Resource requests, limits, etc. for the server cluster placement. This
   # should map directly to the value of the resources field for a PodSpec,
@@ -505,6 +521,10 @@ filer:
   metricsPort: 9327
   loggingOverrideLevel: null
   filerGroup: ""
+  # prefer to read and write to volumes in this data center (not set by default)
+  dataCenter: null
+  # prefer to write to volumes in this rack (not set by default)
+  rack: null
   #  replication type is XYZ:
   # X number of replica in other data centers
   # Y number of replica in other racks in the same data center
@@ -599,6 +619,9 @@ filer:
   # Annotations to be added to the filer pods
   podAnnotations: {}
 
+  # Annotations to be added to the filer resource
+  annotations: {}
+
   ## Set podManagementPolicy
   podManagementPolicy: Parallel
 
@@ -614,6 +637,11 @@ filer:
               app.kubernetes.io/instance: {{ .Release.Name }}
               app.kubernetes.io/component: filer
           topologyKey: kubernetes.io/hostname
+
+  # Topology Spread Constraints Settings
+  # This should map directly to the value of the topologySpreadConstraints
+  # for a PodSpec. By Default no constraints are set.
+  topologySpreadConstraints: {}
 
   # updatePartition is used to control a careful rolling update of SeaweedFS
   # masters.
@@ -812,6 +840,9 @@ s3:
 
   # Annotations to be added to the s3 pods
   podAnnotations: {}
+
+  # Annotations to be added to the s3 resources
+  annotations: {}
 
   # Resource requests, limits, etc. for the server cluster placement. This
   # should map directly to the value of the resources field for a PodSpec,
