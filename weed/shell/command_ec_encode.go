@@ -72,6 +72,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 	parallelCopy := encodeCommand.Bool("parallelCopy", true, "copy shards in parallel")
 	forceChanges := encodeCommand.Bool("force", false, "force the encoding even if the cluster has less than recommended 4 nodes")
 	concurrency := encodeCommand.Int("concurrency", 3, "limit total concurrent ec.encode volume number (default 3)")
+	maxVolumesOnceLoop := encodeCommand.Int("max", 0, "limit max process ec.encode volume number (default 0, no limit)")
 	if err = encodeCommand.Parse(args); err != nil {
 		return nil
 	}
@@ -112,6 +113,8 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 
 	//A maximum of 3 volumes can be processed at one time
 	maxProcessNum := *concurrency
+	//has process volumes
+	hasProcessNum := 0
 
 	if len(volumeIds) == 0 {
 		fmt.Printf("no need ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
@@ -120,6 +123,10 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 
 	//Loop until encode completed all volumes
 	for len(volumeIds) > 0 {
+		if *maxVolumesOnceLoop > 0 && hasProcessNum >= *maxVolumesOnceLoop {
+			glog.V(0).Infof("End loop process volumes, max process volumes:%d, hasProcessNum:%d", *maxVolumesOnceLoop, hasProcessNum)
+			break
+		}
 		fmt.Printf("ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
 		processVolumeIds := volumeIds
 		if len(volumeIds) > maxProcessNum {
@@ -132,6 +139,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		var mu sync.Mutex
 		var errors = make([]error, 0)
 		wg.Add(len(processVolumeIds))
+		hasProcessNum += len(processVolumeIds)
 
 		for _, vid := range processVolumeIds {
 			locations := volumeLocationsMap[vid]
