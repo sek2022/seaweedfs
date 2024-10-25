@@ -114,17 +114,15 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 	//A maximum of 3 volumes can be processed at one time
 	maxProcessNum := *concurrency
 	//has process volumes
-	var hasProcessMaxVolumeId uint32 = 0
 
 	if len(volumeIds) == 0 {
 		fmt.Printf("no need ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
 		return nil
 	}
-
 	//Loop until encode completed all volumes or max volumes
 	for len(volumeIds) > 0 {
-		if *maxVolumesId > 0 && hasProcessMaxVolumeId >= uint32(*maxVolumesId) {
-			glog.V(0).Infof("End loop process volumes, max volumeId:%d, hasProcessNum:%d", *maxVolumesId, hasProcessMaxVolumeId)
+		if *maxVolumesId > 0 && uint32(volumeIds[0]) > uint32(*maxVolumesId) {
+			glog.V(0).Infof("End loop process volumes, max volumeId:%d, min volumeId:%d", *maxVolumesId, volumeIds[0])
 			break
 		}
 		fmt.Printf("ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
@@ -142,11 +140,11 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		for _, vid := range processVolumeIds {
 			locations := volumeLocationsMap[vid]
 			chooseLoc := volumeChooseLocationMap[vid]
-			if hasProcessMaxVolumeId < uint32(vid) {
-				hasProcessMaxVolumeId = uint32(vid)
-			}
 			go func() {
 				defer wg.Done()
+				if *maxVolumesId > 0 && uint32(vid) > uint32(*maxVolumesId) {
+					return
+				}
 				if err = doEcEncode(commandEnv, *collection, vid, locations, chooseLoc, *parallelCopy); err != nil {
 					mu.Lock()
 					errors = append(errors, err)
