@@ -156,6 +156,13 @@ func sortEcNodesByFreeslotsAscending(ecNodes []*EcNode) {
 	})
 }
 
+// volume id sort
+func sortVolumeIdsAscending(volumeIds []needle.VolumeId) {
+	slices.SortFunc(volumeIds, func(a, b needle.VolumeId) int {
+		return int(a) - int(b)
+	})
+}
+
 type CandidateEcNode struct {
 	ecNode     *EcNode
 	shardCount int
