@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
@@ -40,11 +41,10 @@ func (c *commandVacuum) Do(args []string, commandEnv *CommandEnv, writer io.Writ
 	if err = volumeVacuumCommand.Parse(args); err != nil {
 		return nil
 	}
-
+	//fmt.Printf("1 garbageThreshold:%v, volumeId:%d \n", float32(*garbageThreshold), uint32(*volumeId))
 	if err = commandEnv.confirmIsLocked(args); err != nil {
 		return
 	}
-
 	err = commandEnv.MasterClient.WithClient(false, func(client master_pb.SeaweedClient) error {
 		_, err = client.VacuumVolume(context.Background(), &master_pb.VacuumVolumeRequest{
 			GarbageThreshold: float32(*garbageThreshold),
@@ -54,6 +54,7 @@ func (c *commandVacuum) Do(args []string, commandEnv *CommandEnv, writer io.Writ
 		return err
 	})
 	if err != nil {
+		fmt.Printf("error:%v", err)
 		return
 	}
 

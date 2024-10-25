@@ -121,7 +121,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		return nil
 	}
 
-	//Loop until encode completed all volumes
+	//Loop until encode completed all volumes or max volumes
 	for len(volumeIds) > 0 {
 		if *maxVolumesOnceLoop > 0 && hasProcessNum >= *maxVolumesOnceLoop {
 			glog.V(0).Infof("End loop process volumes, max process volumes:%d, hasProcessNum:%d", *maxVolumesOnceLoop, hasProcessNum)

@@ -42,6 +42,7 @@ type MasterOption struct {
 	Master                     pb.ServerAddress
 	MetaFolder                 string
 	VolumeSizeLimitMB          uint32
+	MinWriteableVolumeSize     uint32
 	VolumePreallocate          bool
 	MaxParallelVacuumPerServer int
 	// PulseSeconds            int

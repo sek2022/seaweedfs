@@ -20,6 +20,8 @@ type Statistics struct {
 	Rack                     int64            `json:"Rack"`
 	VolumeNode               int64            `json:"VolumeNode"`
 	VolumeCount              int64            `json:"VolumeCount"`
+	WriteableVolumeCount     int64            `json:"WriteableVolumeCount"`
+	CrowdedVolumeCount       int64            `json:"CrowdedVolumeCount"`
 	ErasureCodingShardsCount int64            `json:"ErasureCodingShardsCount"`
 	DiskTotal                uint64           `json:"DiskTotal"`
 	DiskFree                 uint64           `json:"DiskFree"`
@@ -38,6 +40,7 @@ type RackStatistics struct {
 	Name                     string `json:"Name"`
 	VolumeNode               int64  `json:"VolumeNode"`
 	VolumeCount              int64  `json:"VolumeCount"`
+	ActiveVolumeCount        int64  `json:"ActiveVolumeCount"`
 	ErasureCodingShardsCount int64  `json:"ErasureCodingShardsCount"`
 }
 
@@ -83,7 +86,6 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 				statistics.VolumeNode++
 				statistics.VolumeCount += node.Volumes
 				statistics.ErasureCodingShardsCount += node.EcShards
-
 				rackStatistics.VolumeNode++
 				rackStatistics.VolumeCount += node.Volumes
 				rackStatistics.ErasureCodingShardsCount += node.EcShards
@@ -91,6 +93,14 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 			racksStatistics = append(racksStatistics, rackStatistics)
 		}
 	}
+
+	for _, vlc := range t.ListVolumeLayoutCollections() {
+		vl := vlc.VolumeLayout
+		writable, crowded := vl.GetWritableVolumeCount()
+		statistics.WriteableVolumeCount += int64(writable)
+		statistics.CrowdedVolumeCount += int64(crowded)
+	}
+
 	statistics.DiskTotal = uint64(info.Max) * t.volumeSizeLimit
 	statistics.DiskFree = uint64(info.Free) * t.volumeSizeLimit
 	statistics.DiskUsed = statistics.DiskTotal - statistics.DiskFree

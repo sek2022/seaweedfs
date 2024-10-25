@@ -156,3 +156,8 @@ func TestGetCombinations(t *testing.T) {
 
 	fmt.Printf("result:%v \n", result)
 }
+
+func TestSyscall(t *testing.T) {
+	//err := syscall.Fallocate(int(file.Fd()), FallocFlPunchHole, offset, length)
+	//syscall.Fall
+}
