@@ -75,19 +75,16 @@ func (vs *VolumeServer) VolumeEcShardsGenerate(ctx context.Context, req *volume_
 	}
 
 	// upload .vif files
-	var destroyTime uint64
+	var expireAtSec uint64
 	if v.Ttl != nil {
-		ttlMills := v.Ttl.ToSeconds()
-		if ttlMills > 0 {
-			destroyTime = uint64(time.Now().Unix()) + v.Ttl.ToSeconds() //calculated destroy time from the ec volume was created
+		ttlSecond := v.Ttl.ToSeconds()
+		if ttlSecond > 0 {
+			expireAtSec = uint64(time.Now().Unix()) + ttlSecond //calculated expiration time
 		}
 	}
 	volumeInfo := &volume_server_pb.VolumeInfo{Version: uint32(v.Version())}
-	if destroyTime == 0 {
-		glog.Warningf("gen ec volume,cal ec volume destory time fail,set time to 0,ttl:%v", v.Ttl)
-	} else {
-		volumeInfo.DestroyTime = destroyTime
-	}
+	volumeInfo.ExpireAtSec = expireAtSec
+
 	datSize, _, _ := v.FileStat()
 	volumeInfo.DatFileSize = int64(datSize)
 	if err := volume_info.UploadVolumeInfo(baseFileName+".vif", req.Collection, req.VolumeId, ".vif", volumeInfo, clients); err != nil {
@@ -97,7 +94,7 @@ func (vs *VolumeServer) VolumeEcShardsGenerate(ctx context.Context, req *volume_
 	return &volume_server_pb.VolumeEcShardsGenerateResponse{}, nil
 }
 
-func openEcUploadClients(ecIds map[string]*volume_server_pb.EcIds, dialOption grpc.DialOption) (map[uint32]volume_info.UploadFileClient, []volume_info.UploadFileClient, error) {
+func openEcUploadClients(ecIds map[string]*volume_server_pb.EcShardIds, dialOption grpc.DialOption) (map[uint32]volume_info.UploadFileClient, []volume_info.UploadFileClient, error) {
 	var clientMap = make(map[uint32]volume_info.UploadFileClient, erasure_coding.TotalShardsCount)
 	var clients = make([]volume_info.UploadFileClient, 0)
 

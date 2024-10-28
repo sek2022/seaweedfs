@@ -533,8 +533,8 @@ func balancedEcDistribution(servers []*EcNode) (allocated [][]uint32) {
 	return allocated
 }
 
-func balancedEcDistribution2(servers []*EcNode) (map[string]*volume_server_pb.EcIds, map[string]*EcNode) {
-	allocated := make(map[string]*volume_server_pb.EcIds, len(servers))
+func balancedEcDistribution2(servers []*EcNode) (map[string]*volume_server_pb.EcShardIds, map[string]*EcNode) {
+	allocated := make(map[string]*volume_server_pb.EcShardIds, len(servers))
 	allocatedNodes := make(map[string]*EcNode, len(servers))
 	allocatedShardIdIndex := uint32(0)
 	serverIndex := rand.Intn(len(servers))
@@ -544,7 +544,7 @@ func balancedEcDistribution2(servers []*EcNode) (map[string]*volume_server_pb.Ec
 		key := serverAddress.String()
 		if node.freeEcSlot > 0 {
 			if _, b := allocated[key]; !b {
-				allocated[key] = &volume_server_pb.EcIds{ShardIds: make([]uint32, 0)}
+				allocated[key] = &volume_server_pb.EcShardIds{ShardIds: make([]uint32, 0)}
 			}
 			allocated[key].ShardIds = append(allocated[key].ShardIds, allocatedShardIdIndex)
 			allocatedNodes[key] = node
