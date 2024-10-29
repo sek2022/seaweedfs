@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"google.golang.org/grpc"
 	"io"
 	"math/rand"
 	"sort"
@@ -12,11 +13,8 @@ import (
 	"time"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
-	"github.com/seaweedfs/seaweedfs/weed/pb"
-
-	"google.golang.org/grpc"
-
 	"github.com/seaweedfs/seaweedfs/weed/operation"
+	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
