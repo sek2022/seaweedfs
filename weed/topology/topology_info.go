@@ -93,16 +93,22 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 			racksStatistics = append(racksStatistics, rackStatistics)
 		}
 	}
-
+	volumeFree := uint64(0)
 	for _, vlc := range t.ListVolumeLayoutCollections() {
 		vl := vlc.VolumeLayout
 		writable, crowded := vl.GetWritableVolumeCount()
+
+		if writable > 0 {
+			stats := vl.Stats()
+			volumeFree += stats.TotalSize - stats.UsedSize
+		}
+
 		statistics.WriteableVolumeCount += int64(writable)
 		statistics.CrowdedVolumeCount += int64(crowded)
 	}
 
 	statistics.DiskTotal = uint64(info.Max) * t.volumeSizeLimit
-	statistics.DiskFree = uint64(info.Free) * t.volumeSizeLimit
+	statistics.DiskFree = uint64(info.Free)*t.volumeSizeLimit + volumeFree
 	statistics.DiskUsed = statistics.DiskTotal - statistics.DiskFree
 	result := float64(statistics.DiskUsed) / float64(statistics.DiskTotal) * float64(100)
 	statistics.DiskUsages = fmt.Sprintf("%.2f", result)
