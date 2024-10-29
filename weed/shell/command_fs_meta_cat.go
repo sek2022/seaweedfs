@@ -65,10 +65,32 @@ func (c *commandFsMetaCat) Do(args []string, commandEnv *CommandEnv, writer io.W
 		gzippedBytes, _ := util.GzipData(bytes)
 		// zstdBytes, _ := util.ZstdData(bytes)
 		// fmt.Fprintf(writer, "chunks %d meta size: %d gzip:%d zstd:%d\n", len(respLookupEntry.Entry.GetChunks()), len(bytes), len(gzippedBytes), len(zstdBytes))
-		fmt.Fprintf(writer, "chunks %d meta size: %d gzip:%d\n", len(respLookupEntry.Entry.GetChunks()), len(bytes), len(gzippedBytes))
+
+		fmt.Fprintf(writer, "chunks %d meta size: %d gzip:%d volume:%s\n", len(respLookupEntry.Entry.GetChunks()), len(bytes), len(gzippedBytes), getFileChunksMinAndMaxVolumeId(chunks))
 
 		return nil
 
 	})
 
+}
+
+// return min-max: 1-100
+func getFileChunksMinAndMaxVolumeId(chunks []*filer_pb.FileChunk) string {
+	volumeIds := getFileVolumeIds(chunks)
+	if len(volumeIds) > 0 {
+		return fmt.Sprintf("%d-%d", volumeIds[0], volumeIds[len(volumeIds)-1])
+	}
+	return "no-no"
+}
+
+func getFileVolumeIds(chunks []*filer_pb.FileChunk) []uint32 {
+	volumeIds := make([]uint32, 0)
+	for _, chunk := range chunks {
+		volumeIds = append(volumeIds, chunk.Fid.VolumeId)
+	}
+
+	sort.Slice(volumeIds, func(i, j int) bool {
+		return volumeIds[i] < volumeIds[j]
+	})
+	return volumeIds
 }
