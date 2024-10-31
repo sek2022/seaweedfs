@@ -76,14 +76,18 @@
                     <td>Free: {{bytesToHumanReadable .Topology.Statistics.DiskFree}}</td>
                     <td>Used: {{bytesToHumanReadable .Topology.Statistics.DiskUsed}}</td>
                     <td>Usage: {{.Topology.Statistics.DiskUsages}}%</td>
-                    <td></td>
                 </tr>
                 <tr>
                     <td>Data Center: {{.Topology.Statistics.Dc}}</td>
                     <td>Rack: {{.Topology.Statistics.Rack}}</td>
                     <td>Node: {{.Topology.Statistics.VolumeNode}}</td>
                     <td>Volume: {{.Topology.Statistics.VolumeCount}}<span title="writeable" style="color: #3c763d">({{.Topology.Statistics.WriteableVolumeCount}})</span></td>
+                </tr>
+                <tr>
                     <td>ECShards: {{.Topology.Statistics.ErasureCodingShardsCount}}</td>
+                    <td>Writeable: {{.Topology.Statistics.WriteableVolumeCount}}</td>
+                    <td><span title="writeable" style="color: #c9302c">WaitFixReplication: {{.Topology.Statistics.WaitFixReplicationCount}}</span></td>
+                    <td>Crowded: {{.Topology.Statistics.CrowdedVolumeCount}}</td>
                 </tr>
             </table>
         </div>
@@ -108,6 +112,30 @@
                     <td>{{$racks.VolumeNode}}</td>
                     <td>{{$racks.VolumeCount}}</td>
                     <td>{{$racks.ErasureCodingShardsCount}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div class="col-sm-12">
+            <h2>Wait Fix Replication Volume</h2>
+            <table class="table table-striped">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Volume Id</th>
+                    <th>Nodes</th>
+                </tr>
+                </thead>
+                {{ range $readonly_index, $data := .Topology.Statistics.WaitFixReplicationVolumes }}
+                <tr>
+                    <td>{{$readonly_index}}</td>
+                    <td>{{$data.VolumeId}}</td>
+                    <td>
+                        {{ range $url_index, $url := $data.Urls }}
+                            <a href="http://{{ $url }}/ui/index.html">{{ $url }}</a> <br>
+                        {{ end }}
+                    </td>
                 </tr>
                 {{end}}
             </table>

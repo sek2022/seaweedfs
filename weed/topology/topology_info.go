@@ -16,24 +16,26 @@ type TopologyInfo struct {
 }
 
 type Statistics struct {
-	Dc                       int64            `json:"Dc"`
-	Rack                     int64            `json:"Rack"`
-	VolumeNode               int64            `json:"VolumeNode"`
-	VolumeCount              int64            `json:"VolumeCount"`
-	WriteableVolumeCount     int64            `json:"WriteableVolumeCount"`
-	CrowdedVolumeCount       int64            `json:"CrowdedVolumeCount"`
-	ErasureCodingShardsCount int64            `json:"ErasureCodingShardsCount"`
-	DiskTotal                uint64           `json:"DiskTotal"`
-	DiskFree                 uint64           `json:"DiskFree"`
-	DiskUsed                 uint64           `json:"DiskUsed"`
-	DiskUsages               string           `json:"DiskUsages"`
-	RackStatistics           []RackStatistics `json:"RackStatistics"`
+	Dc                        int64                      `json:"Dc"`
+	Rack                      int64                      `json:"Rack"`
+	VolumeNode                int64                      `json:"VolumeNode"`
+	VolumeCount               int64                      `json:"VolumeCount"`
+	WriteableVolumeCount      int64                      `json:"WriteableVolumeCount"`
+	CrowdedVolumeCount        int64                      `json:"CrowdedVolumeCount"`
+	ErasureCodingShardsCount  int64                      `json:"ErasureCodingShardsCount"`
+	DiskTotal                 uint64                     `json:"DiskTotal"`
+	DiskFree                  uint64                     `json:"DiskFree"`
+	DiskUsed                  uint64                     `json:"DiskUsed"`
+	DiskUsages                string                     `json:"DiskUsages"`
+	RackStatistics            []RackStatistics           `json:"RackStatistics"`
+	WaitFixReplicationCount   int64                      `json:"WaitFixReplicationCount"`
+	WaitFixReplicationVolumes []WaitFixReplicationVolume `json:"WaitFixReplicationVolumes"`
 }
 
-//type DataCenterStatistics struct {
-//	Name           string           `json:"Name"`
-//	RackStatistics []RackStatistics `json:"RackStatistics"`
-//}
+type WaitFixReplicationVolume struct {
+	VolumeId uint32
+	Urls     []string
+}
 
 type RackStatistics struct {
 	DcName                   string `json:"DcName"`
@@ -94,6 +96,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 		}
 	}
 	volumeFree := uint64(0)
+	waitFixReplicationVolumes := make([]WaitFixReplicationVolume, 0)
 	for _, vlc := range t.ListVolumeLayoutCollections() {
 		vl := vlc.VolumeLayout
 		writable, crowded := vl.GetWritableVolumeCount()
@@ -103,9 +106,23 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 			volumeFree += stats.TotalSize - stats.UsedSize
 		}
 
+		for vid, location := range vl.vid2location {
+			if vl.rp.GetCopyCount() > len(location.list) {
+				urls := make([]string, 0)
+				for _, dn := range location.list {
+					urls = append(urls, dn.Url())
+				}
+				volume := WaitFixReplicationVolume{VolumeId: uint32(vid), Urls: urls}
+				waitFixReplicationVolumes = append(waitFixReplicationVolumes, volume)
+			}
+		}
+
 		statistics.WriteableVolumeCount += int64(writable)
 		statistics.CrowdedVolumeCount += int64(crowded)
 	}
+
+	statistics.WaitFixReplicationCount = int64(len(waitFixReplicationVolumes))
+	statistics.WaitFixReplicationVolumes = waitFixReplicationVolumes
 
 	statistics.DiskTotal = uint64(info.Max) * t.volumeSizeLimit
 	statistics.DiskFree = uint64(info.Free)*t.volumeSizeLimit + volumeFree

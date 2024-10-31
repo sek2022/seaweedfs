@@ -40,7 +40,8 @@ func (vs *VolumeServer) VacuumVolumeCompact(req *volume_server_pb.VacuumVolumeCo
 	}(start)
 
 	resp := &volume_server_pb.VacuumVolumeCompactResponse{}
-	reportInterval := int64(1024 * 1024 * 128)
+	//update reportInterval from 128M to 8G
+	reportInterval := int64(1024 * 1024 * 1024 * 8)
 	nextReportTarget := reportInterval
 	fs, fsErr := procfs.NewDefaultFS()
 	var sendErr error
