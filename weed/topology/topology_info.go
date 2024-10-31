@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
 	"golang.org/x/exp/slices"
+	"sort"
 	"strings"
 )
 
@@ -120,6 +121,10 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 		statistics.WriteableVolumeCount += int64(writable)
 		statistics.CrowdedVolumeCount += int64(crowded)
 	}
+
+	sort.Slice(waitFixReplicationVolumes, func(i, j int) bool {
+		return waitFixReplicationVolumes[i].VolumeId < waitFixReplicationVolumes[j].VolumeId
+	})
 
 	statistics.WaitFixReplicationCount = int64(len(waitFixReplicationVolumes))
 	statistics.WaitFixReplicationVolumes = waitFixReplicationVolumes
