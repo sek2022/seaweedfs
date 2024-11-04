@@ -3,6 +3,7 @@ package topology
 import (
 	"fmt"
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
+	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"golang.org/x/exp/slices"
 	"sort"
 	"strings"
@@ -31,11 +32,19 @@ type Statistics struct {
 	RackStatistics            []RackStatistics           `json:"RackStatistics"`
 	WaitFixReplicationCount   int64                      `json:"WaitFixReplicationCount"`
 	WaitFixReplicationVolumes []WaitFixReplicationVolume `json:"WaitFixReplicationVolumes"`
+	WaitFixEcShardsCount      int64                      `json:"WaitFixEcShardsCount"`
+	WaitFixEcShardsVolumes    []WaitFixEcShardsVolume    `json:"WaitFixEcShardsVolumes"`
 }
 
 type WaitFixReplicationVolume struct {
 	VolumeId uint32
 	Urls     []string
+}
+
+type WaitFixEcShardsVolume struct {
+	VolumeId      uint32
+	EcShardsCount int64
+	Unrepairable  bool
 }
 
 type RackStatistics struct {
@@ -128,6 +137,23 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 
 	statistics.WaitFixReplicationCount = int64(len(waitFixReplicationVolumes))
 	statistics.WaitFixReplicationVolumes = waitFixReplicationVolumes
+
+	waitFixEcShardsVolumes := make([]WaitFixEcShardsVolume, 0)
+	for vid, ecShardLocations := range t.ecShardMap {
+		shardCount := ecShardLocations.shardCount()
+		if shardCount == erasure_coding.TotalShardsCount {
+			continue
+		}
+
+		waitFixEcShardsVolume := WaitFixEcShardsVolume{VolumeId: uint32(vid), EcShardsCount: int64(shardCount), Unrepairable: false}
+		if shardCount < erasure_coding.DataShardsCount {
+			waitFixEcShardsVolume.Unrepairable = true
+		}
+		waitFixEcShardsVolumes = append(waitFixEcShardsVolumes, waitFixEcShardsVolume)
+	}
+
+	statistics.WaitFixEcShardsCount = int64(len(waitFixEcShardsVolumes))
+	statistics.WaitFixEcShardsVolumes = waitFixEcShardsVolumes
 
 	statistics.DiskTotal = uint64(info.Max) * t.volumeSizeLimit
 	statistics.DiskFree = uint64(info.Free)*t.volumeSizeLimit + volumeFree
