@@ -36,12 +36,21 @@ func TestEcDistribution(t *testing.T) {
 }
 
 var vMap = map[needle.VolumeId][]wdclient.Location{
-	needle.VolumeId(1): {wdclient.Location{Url: "192.168.3.74:10001"}, wdclient.Location{Url: "192.168.3.75:10001"}},
-	needle.VolumeId(2): {wdclient.Location{Url: "192.168.3.76:10001"}, wdclient.Location{Url: "192.168.3.77:10001"}},
-	needle.VolumeId(3): {wdclient.Location{Url: "192.168.3.78:10001"}, wdclient.Location{Url: "192.168.3.74:10002"}},
-	needle.VolumeId(4): {wdclient.Location{Url: "192.168.3.75:10002"}, wdclient.Location{Url: "192.168.3.76:10002"}},
-	needle.VolumeId(5): {wdclient.Location{Url: "192.168.3.77:10002"}, wdclient.Location{Url: "192.168.3.78:10002"}},
-	needle.VolumeId(6): {wdclient.Location{Url: "192.168.3.74:10003"}, wdclient.Location{Url: "192.168.3.77:10003"}},
+	needle.VolumeId(1):  {wdclient.Location{Url: "192.168.3.74:10001"}, wdclient.Location{Url: "192.168.3.75:10001"}},
+	needle.VolumeId(2):  {wdclient.Location{Url: "192.168.3.76:10001"}, wdclient.Location{Url: "192.168.3.77:10001"}},
+	needle.VolumeId(3):  {wdclient.Location{Url: "192.168.3.78:10001"}, wdclient.Location{Url: "192.168.3.74:10002"}},
+	needle.VolumeId(4):  {wdclient.Location{Url: "192.168.3.75:10002"}, wdclient.Location{Url: "192.168.3.76:10002"}},
+	needle.VolumeId(5):  {wdclient.Location{Url: "192.168.3.77:10002"}, wdclient.Location{Url: "192.168.3.78:10002"}},
+	needle.VolumeId(6):  {wdclient.Location{Url: "192.168.3.74:10003"}, wdclient.Location{Url: "192.168.3.77:10003"}},
+	needle.VolumeId(7):  {wdclient.Location{Url: "192.168.3.74:10003"}, wdclient.Location{Url: "192.168.3.79:10003"}},
+	needle.VolumeId(8):  {wdclient.Location{Url: "192.168.3.79:10003"}, wdclient.Location{Url: "192.168.3.76:10003"}},
+	needle.VolumeId(9):  {wdclient.Location{Url: "192.168.3.80:10003"}, wdclient.Location{Url: "192.168.3.75:10003"}},
+	needle.VolumeId(10): {wdclient.Location{Url: "192.168.3.81:10003"}, wdclient.Location{Url: "192.168.3.79:10003"}},
+	needle.VolumeId(11): {wdclient.Location{Url: "192.168.3.82:10003"}, wdclient.Location{Url: "192.168.3.81:10003"}},
+	needle.VolumeId(12): {wdclient.Location{Url: "192.168.3.83:10003"}, wdclient.Location{Url: "192.168.3.84:10003"}},
+	needle.VolumeId(13): {wdclient.Location{Url: "192.168.3.81:10003"}, wdclient.Location{Url: "192.168.3.83:10003"}},
+	needle.VolumeId(14): {wdclient.Location{Url: "192.168.3.78:10003"}, wdclient.Location{Url: "192.168.3.81:10003"}},
+	needle.VolumeId(15): {wdclient.Location{Url: "192.168.3.76:10003"}, wdclient.Location{Url: "192.168.3.80:10003"}},
 }
 
 func GetLocationsClone(vid needle.VolumeId) (v []wdclient.Location, b bool) {
@@ -54,10 +63,13 @@ func GetLocationsClone(vid needle.VolumeId) (v []wdclient.Location, b bool) {
 // volumeChooseLocationMap: map[1:{Url:192.168.3.75:10001} 2:{Url:192.168.3.76:10001} 3:{Url:192.168.3.78:10001} 4:{Url:192.168.3.75:10002} 5:{Url:192.168.3.78:10002} 6:{Url:192.168.3.74:10003}]
 func Test_getServerDisplayTimesInVolumes(t *testing.T) {
 	volumeIds := maps.Keys(vMap)
+	sort.Slice(volumeIds, func(i, j int) bool {
+		return volumeIds[i] < volumeIds[j]
+	})
 	commandEnv := CommandEnv{}
 	commandEnv.MasterClient = &wdclient.MasterClient{}
 
-	volumeLocationsMap, volumeChooseLocationMap := getServerDisplayTimesInVolumesTest(&commandEnv, volumeIds)
+	volumeLocationsMap, volumeChooseLocationMap := chooseMasterForAllVolumesTest(&commandEnv, volumeIds)
 
 	fmt.Printf("volumeLocationsMap: %v \n", volumeLocationsMap)
 	fmt.Printf("volumeChooseLocationMap: %v \n", volumeChooseLocationMap)
@@ -65,21 +77,44 @@ func Test_getServerDisplayTimesInVolumes(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(len(volumeIds))
 	for _, vid := range volumeIds {
-		locations := volumeLocationsMap[vid]
 		chooseLoc := volumeChooseLocationMap[vid]
+		fmt.Printf("vid:%d, location:%v \n", vid, chooseLoc)
 		go func() {
 			defer wg.Done()
-			fmt.Printf("locations:%v \n", locations)
-			fmt.Printf("location:%v \n", chooseLoc)
+			//fmt.Printf("vid:%d, locations:%v \n", vid, locations)
+
 		}()
 	}
 	wg.Wait()
 
 }
 
-// server IP display times in volumes. if times is more, The lower the priority
-func getServerDisplayTimesInVolumesTest(commandEnv *CommandEnv, volumeIds []needle.VolumeId) (map[needle.VolumeId][]wdclient.Location, map[needle.VolumeId]wdclient.Location) {
-	var serversDisplayTimesInVolumes = make(map[string]uint32)
+func chooseMasterForAllVolumesTest(commandEnv *CommandEnv, volumeIds []needle.VolumeId) (map[needle.VolumeId][]wdclient.Location, map[needle.VolumeId]wdclient.Location) {
+	var volumeLocationsMap = make(map[needle.VolumeId][]wdclient.Location)
+	var volumeChooseLocationMap = make(map[needle.VolumeId]wdclient.Location)
+	for _, vid := range volumeIds {
+		//locations, found := commandEnv.MasterClient.GetLocationsClone(uint32(vid))
+		locations, found := GetLocationsClone(vid)
+		if !found {
+			continue
+		}
+		volumeLocationsMap[vid] = locations
+	}
+	remainVolumeIds := volumeIds
+	for len(remainVolumeIds) > 0 {
+		locationMap, rem := chooseMasterServerForVolumesTest(remainVolumeIds)
+		for key, value := range locationMap {
+			volumeChooseLocationMap[key] = value
+		}
+		remainVolumeIds = rem
+	}
+
+	return volumeLocationsMap, volumeChooseLocationMap
+}
+
+// choose a master server for volume
+func chooseMasterServerForVolumesTest(volumeIds []needle.VolumeId) (map[needle.VolumeId]wdclient.Location, []needle.VolumeId) {
+	var serversWithVolumes = make(map[string][]uint32)
 	var volumeLocationsMap = make(map[needle.VolumeId][]wdclient.Location)
 	var volumeChooseLocationMap = make(map[needle.VolumeId]wdclient.Location)
 	//1-192.168.3.74 = []
@@ -97,27 +132,37 @@ func getServerDisplayTimesInVolumesTest(commandEnv *CommandEnv, volumeIds []need
 				continue
 			}
 			//init 1 times
-			serversDisplayTimesInVolumes[serverIp] = uint32(1)
+			var ipVolumeIds []uint32
+			var b bool
+			if ipVolumeIds, b = serversWithVolumes[serverIp]; !b {
+				ipVolumeIds = make([]uint32, 0)
+			}
+			ipVolumeIds = append(ipVolumeIds, uint32(vid))
+			serversWithVolumes[serverIp] = ipVolumeIds
 		}
 	}
-	var intVolumeIds = make([]int, 0)
-	for _, vid := range volumeIds {
-		intVolumeIds = append(intVolumeIds, int(vid))
+
+	keys := make([]string, 0, len(serversWithVolumes))
+	for k := range serversWithVolumes {
+		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 
-	sort.Ints(intVolumeIds)
-	//startIndex := rand.IntN(len(intVolumeIds) - 1)
-	var result [][]int
-	permute(intVolumeIds, len(intVolumeIds), &result)
+	var combinations = make([][]uint32, len(serversWithVolumes))
+	for i, key := range keys {
+		combinations[i] = serversWithVolumes[key]
+	}
+	volumeCombinations := getCombination(combinations...)
+	maxCount := 0
+	var maxVolumeChooseLocationMap map[needle.VolumeId]wdclient.Location
 
-	for _, currentVolumeIds := range result {
+	for _, currentVolumeIds := range volumeCombinations {
 		volumeChooseLocationMap = make(map[needle.VolumeId]wdclient.Location)
-		for _, vid := range currentVolumeIds {
+		for index, vid := range currentVolumeIds {
 			locations := volumeLocationsMap[needle.VolumeId(vid)]
 			if len(locations) == 0 {
 				continue
 			}
-			var times = uint32(1000)
 			var chooseLoc = wdclient.Location{}
 			for _, loc := range locations {
 				serverIp := splitIP(loc.Url)
@@ -125,28 +170,31 @@ func getServerDisplayTimesInVolumesTest(commandEnv *CommandEnv, volumeIds []need
 					fmt.Printf("loc url is err:%s", loc.Url)
 					continue
 				}
-				locTimes := serversDisplayTimesInVolumes[serverIp]
-				if locTimes < times {
-					times = locTimes
+				if keys[index] == serverIp {
 					chooseLoc = loc
 				}
 			}
 			volumeChooseLocationMap[needle.VolumeId(vid)] = chooseLoc
-			//////
-			serverIp := splitIP(chooseLoc.Url)
-			var newTimes = uint32(0)
-			if v, b := serversDisplayTimesInVolumes[serverIp]; b {
-				newTimes = v
-			}
-			newTimes++
-			serversDisplayTimesInVolumes[serverIp] = newTimes
 		}
 
-		if checkFillFullServers(volumeChooseLocationMap, len(serversDisplayTimesInVolumes)) {
+		count := fillServerCount(volumeChooseLocationMap)
+		if count > maxCount {
+			maxCount = count
+			maxVolumeChooseLocationMap = volumeChooseLocationMap
+		}
+
+		if maxCount >= len(keys) {
 			break
 		}
 	}
-	return volumeLocationsMap, volumeChooseLocationMap
+	remainVolumeIds := make([]needle.VolumeId, 0)
+	for _, vid := range volumeIds {
+		if _, b := maxVolumeChooseLocationMap[vid]; !b {
+			remainVolumeIds = append(remainVolumeIds, vid)
+		}
+	}
+
+	return maxVolumeChooseLocationMap, remainVolumeIds
 }
 
 func TestGetCombinations(t *testing.T) {
