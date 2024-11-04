@@ -164,26 +164,6 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 	return nil
 }
 
-// Recursive function is used to obtain the permutations and combinations of an array
-func permute(arr []int, n int, result *[][]int) {
-	if n == 1 {
-		temp := make([]int, len(arr))
-		copy(temp, arr)
-		*result = append(*result, temp)
-		return
-	} else {
-		for i := 0; i < n; i++ {
-			permute(arr, n-1, result)
-			if n%2 == 1 {
-				arr[0], arr[n-1] = arr[n-1], arr[0]
-			} else {
-				arr[i], arr[n-1] = arr[n-1], arr[i]
-			}
-		}
-	}
-	return
-}
-
 // ensure every volume allocate a master server location for ec encode
 func chooseEncodeLocationForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.VolumeId) (map[needle.VolumeId][]wdclient.Location, map[needle.VolumeId]wdclient.Location) {
 	var volumeLocationsMap = make(map[needle.VolumeId][]wdclient.Location)
