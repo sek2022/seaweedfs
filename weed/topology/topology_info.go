@@ -115,7 +115,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 			stats := vl.Stats()
 			volumeFree += stats.TotalSize - stats.UsedSize
 		}
-
+		vl.accessLock.RLock()
 		for vid, location := range vl.vid2location {
 			if vl.rp.GetCopyCount() > len(location.list) {
 				urls := make([]string, 0)
@@ -126,6 +126,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 				waitFixReplicationVolumes = append(waitFixReplicationVolumes, volume)
 			}
 		}
+		vl.accessLock.RUnlock()
 
 		statistics.WriteableVolumeCount += int64(writable)
 		statistics.CrowdedVolumeCount += int64(crowded)
@@ -139,6 +140,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 	statistics.WaitFixReplicationVolumes = waitFixReplicationVolumes
 
 	waitFixEcShardsVolumes := make([]WaitFixEcShardsVolume, 0)
+	t.ecShardMapLock.RLock()
 	for vid, ecShardLocations := range t.ecShardMap {
 		shardCount := ecShardLocations.shardCount()
 		if shardCount == erasure_coding.TotalShardsCount {
@@ -151,6 +153,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 		}
 		waitFixEcShardsVolumes = append(waitFixEcShardsVolumes, waitFixEcShardsVolume)
 	}
+	t.ecShardMapLock.RUnlock()
 
 	statistics.WaitFixEcShardsCount = int64(len(waitFixEcShardsVolumes))
 	statistics.WaitFixEcShardsVolumes = waitFixEcShardsVolumes
