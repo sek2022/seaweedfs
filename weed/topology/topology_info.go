@@ -3,6 +3,7 @@ package topology
 import (
 	"fmt"
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
+	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"golang.org/x/exp/slices"
 	"sort"
 	"strings"
@@ -31,11 +32,19 @@ type Statistics struct {
 	RackStatistics            []RackStatistics           `json:"RackStatistics"`
 	WaitFixReplicationCount   int64                      `json:"WaitFixReplicationCount"`
 	WaitFixReplicationVolumes []WaitFixReplicationVolume `json:"WaitFixReplicationVolumes"`
+	WaitFixEcShardsCount      int64                      `json:"WaitFixEcShardsCount"`
+	WaitFixEcShardsVolumes    []WaitFixEcShardsVolume    `json:"WaitFixEcShardsVolumes"`
 }
 
 type WaitFixReplicationVolume struct {
 	VolumeId uint32
 	Urls     []string
+}
+
+type WaitFixEcShardsVolume struct {
+	VolumeId      uint32
+	EcShardsCount int64
+	Unrepairable  bool
 }
 
 type RackStatistics struct {
@@ -106,7 +115,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 			stats := vl.Stats()
 			volumeFree += stats.TotalSize - stats.UsedSize
 		}
-
+		vl.accessLock.RLock()
 		for vid, location := range vl.vid2location {
 			if vl.rp.GetCopyCount() > len(location.list) {
 				urls := make([]string, 0)
@@ -117,6 +126,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 				waitFixReplicationVolumes = append(waitFixReplicationVolumes, volume)
 			}
 		}
+		vl.accessLock.RUnlock()
 
 		statistics.WriteableVolumeCount += int64(writable)
 		statistics.CrowdedVolumeCount += int64(crowded)
@@ -128,6 +138,25 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 
 	statistics.WaitFixReplicationCount = int64(len(waitFixReplicationVolumes))
 	statistics.WaitFixReplicationVolumes = waitFixReplicationVolumes
+
+	waitFixEcShardsVolumes := make([]WaitFixEcShardsVolume, 0)
+	t.ecShardMapLock.RLock()
+	for vid, ecShardLocations := range t.ecShardMap {
+		shardCount := ecShardLocations.shardCount()
+		if shardCount == erasure_coding.TotalShardsCount {
+			continue
+		}
+
+		waitFixEcShardsVolume := WaitFixEcShardsVolume{VolumeId: uint32(vid), EcShardsCount: int64(shardCount), Unrepairable: false}
+		if shardCount < erasure_coding.DataShardsCount {
+			waitFixEcShardsVolume.Unrepairable = true
+		}
+		waitFixEcShardsVolumes = append(waitFixEcShardsVolumes, waitFixEcShardsVolume)
+	}
+	t.ecShardMapLock.RUnlock()
+
+	statistics.WaitFixEcShardsCount = int64(len(waitFixEcShardsVolumes))
+	statistics.WaitFixEcShardsVolumes = waitFixEcShardsVolumes
 
 	statistics.DiskTotal = uint64(info.Max) * t.volumeSizeLimit
 	statistics.DiskFree = uint64(info.Free)*t.volumeSizeLimit + volumeFree

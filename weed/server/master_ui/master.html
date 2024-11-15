@@ -89,6 +89,12 @@
                     <td><span title="writeable" style="color: #c9302c">WaitFixReplication: {{.Topology.Statistics.WaitFixReplicationCount}}</span></td>
                     <td>Crowded: {{.Topology.Statistics.CrowdedVolumeCount}}</td>
                 </tr>
+                <tr>
+                    <td>WaitFixEcShardsCount: {{.Topology.Statistics.WaitFixEcShardsCount}}</td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                </tr>
             </table>
         </div>
         <div class="col-sm-12">
@@ -135,6 +141,28 @@
                         {{ range $url_index, $url := $data.Urls }}
                             <a href="http://{{ $url }}/ui/index.html">{{ $url }}</a> <br>
                         {{ end }}
+                    </td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div class="col-sm-12">
+            <h2>Wait Fix EcShards Volume</h2>
+            <table class="table table-striped">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Volume Id</th>
+                    <th>Shards Count</th>
+                </tr>
+                </thead>
+                {{ range $readonly_index, $data := .Topology.Statistics.WaitFixEcShardsVolumes }}
+                <tr>
+                    <td>{{$readonly_index}}</td>
+                    <td>{{$data.VolumeId}}</td>
+                    <td>
+                        {{$data.EcShardsCount}}
                     </td>
                 </tr>
                 {{end}}

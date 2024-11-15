@@ -99,6 +99,15 @@ func (loc *EcShardLocations) DeleteShard(shardId erasure_coding.ShardId, dn *Dat
 	return true
 }
 
+func (loc *EcShardLocations) shardCount() (count int) {
+	for _, locations := range loc.Locations {
+		if len(locations) > 0 {
+			count++
+		}
+	}
+	return
+}
+
 func (t *Topology) RegisterEcShards(ecShardInfos *erasure_coding.EcVolumeInfo, dn *DataNode) {
 
 	t.ecShardMapLock.Lock()
