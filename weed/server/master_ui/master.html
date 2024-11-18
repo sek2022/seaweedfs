@@ -33,14 +33,14 @@
                 {{ with .RaftServer }}
                 <tr>
                     <th>Leader</th>
-                    <td><a href="http://{{ .Leader }}">{{ .Leader }}</a></td>
+                    <td><a href="{{ url .Leader }}">{{ .Leader }}</a></td>
                 </tr>
                 <tr>
                     <th>Other Masters</th>
                     <td class="col-sm-5">
                         <ul class="list-unstyled">
                             {{ range $k, $p := .Peers }}
-                            <li><a href="http://{{ $p.Name }}/ui/index.html">{{ $p.Name }}</a></li>
+                            <li><a href="{{ url  $p.Name }}/ui/index.html">{{ $p.Name }}</a></li>
                             {{ end }}
                         </ul>
                     </td>
@@ -68,41 +68,143 @@
     </div>
 
     <div class="row">
-        <h2>Topology</h2>
-        <table class="table table-striped">
-            <thead>
-            <tr>
-                <th>Data Center</th>
-                <th>Rack</th>
-                <th>RemoteAddr</th>
-                <th>#Volumes</th>
-                <th>Volume Ids</th>
-                <th>#ErasureCodingShards</th>
-                <th>Max</th>
-            </tr>
-            </thead>
-            <tbody>
-            {{ range $dc_index, $dc := .Topology.DataCenters }}
-            {{ range $rack_index, $rack := $dc.Racks }}
-            {{ range $dn_index, $dn := $rack.DataNodes }}
-            <tr>
-                <td><code>{{ $dc.Id }}</code></td>
-                <td>{{ $rack.Id }}</td>
-                <td><a href="http://{{ $dn.Url }}/ui/index.html">{{ $dn.Url }}</a>
-                    {{ if ne $dn.PublicUrl $dn.Url }}
-                    / <a href="http://{{ $dn.PublicUrl }}/ui/index.html">{{ $dn.PublicUrl }}</a>
-                    {{ end }}
-                </td>
-                <td>{{ $dn.Volumes }}</td>
-                <td>{{ $dn.VolumeIds}}</td>
-                <td>{{ $dn.EcShards }}</td>
-                <td>{{ $dn.Max }}</td>
-            </tr>
-            {{ end }}
-            {{ end }}
-            {{ end }}
-            </tbody>
-        </table>
+        <div class="col-sm-12">
+            <h2>Statistics</h2>
+            <table class="table table-striped">
+                <tr>
+                    <td>Total: {{bytesToHumanReadable .Topology.Statistics.DiskTotal}}</td>
+                    <td>Free: {{bytesToHumanReadable .Topology.Statistics.DiskFree}}</td>
+                    <td>Used: {{bytesToHumanReadable .Topology.Statistics.DiskUsed}}</td>
+                    <td>Usage: {{.Topology.Statistics.DiskUsages}}%</td>
+                </tr>
+                <tr>
+                    <td>Data Center: {{.Topology.Statistics.Dc}}</td>
+                    <td>Rack: {{.Topology.Statistics.Rack}}</td>
+                    <td>Node: {{.Topology.Statistics.VolumeNode}}</td>
+                    <td>Volume: {{.Topology.Statistics.VolumeCount}}<span title="writeable" style="color: #3c763d">({{.Topology.Statistics.WriteableVolumeCount}})</span></td>
+                </tr>
+                <tr>
+                    <td>ECShards: {{.Topology.Statistics.ErasureCodingShardsCount}}</td>
+                    <td>Writeable: {{.Topology.Statistics.WriteableVolumeCount}}</td>
+                    <td><span title="writeable" style="color: #c9302c">WaitFixReplication: {{.Topology.Statistics.WaitFixReplicationCount}}</span></td>
+                    <td>Crowded: {{.Topology.Statistics.CrowdedVolumeCount}}</td>
+                </tr>
+                <tr>
+                    <td>WaitFixEcShardsCount: {{.Topology.Statistics.WaitFixEcShardsCount}}</td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+            </table>
+        </div>
+        <div class="col-sm-12">
+            <h2>Rack Statistics</h2>
+            <table class="table table-striped">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Data Center</th>
+                    <th>Rack</th>
+                    <th>Volume Node Count</th>
+                    <th>Volume Count</th>
+                    <th>ErasureCodingShards Count</th>
+                </tr>
+                </thead>
+                {{ range $rack_index, $racks := .Topology.Statistics.RackStatistics }}
+                <tr>
+                    <td>{{$rack_index}}</td>
+                    <td>{{$racks.DcName}}</td>
+                    <td>{{$racks.Name}}</td>
+                    <td>{{$racks.VolumeNode}}</td>
+                    <td>{{$racks.VolumeCount}}</td>
+                    <td>{{$racks.ErasureCodingShardsCount}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div class="col-sm-12">
+            <h2>Wait Fix Replication Volume</h2>
+            <table class="table table-striped">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Volume Id</th>
+                    <th>Nodes</th>
+                </tr>
+                </thead>
+                {{ range $readonly_index, $data := .Topology.Statistics.WaitFixReplicationVolumes }}
+                <tr>
+                    <td>{{$readonly_index}}</td>
+                    <td>{{$data.VolumeId}}</td>
+                    <td>
+                        {{ range $url_index, $url := $data.Urls }}
+                        <a href="{{ url $url }}/ui/index.html">{{ $url }}</a> <br>
+                        {{ end }}
+                    </td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div class="col-sm-12">
+            <h2>Wait Fix EcShards Volume</h2>
+            <table class="table table-striped">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Volume Id</th>
+                    <th>Shards Count</th>
+                </tr>
+                </thead>
+                {{ range $readonly_index, $data := .Topology.Statistics.WaitFixEcShardsVolumes }}
+                <tr>
+                    <td>{{$readonly_index}}</td>
+                    <td>{{$data.VolumeId}}</td>
+                    <td>
+                        {{$data.EcShardsCount}}
+                    </td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+        <div class="col-sm-12">
+            <h2>Topology</h2>
+            <table class="table table-striped">
+                <thead>
+                <tr>
+                    <th>Data Center</th>
+                    <th>Rack</th>
+                    <th>RemoteAddr</th>
+                    <th>#Volumes</th>
+                    <th>Volume Ids</th>
+                    <th>#ErasureCodingShards</th>
+                    <th>Max</th>
+                </tr>
+                </thead>
+                <tbody>
+                {{ range $dc_index, $dc := .Topology.DataCenters }}
+                {{ range $rack_index, $rack := $dc.Racks }}
+                {{ range $dn_index, $dn := $rack.DataNodes }}
+                <tr>
+                    <td><code>{{ $dc.Id }}</code></td>
+                    <td>{{ $rack.Id }}</td>
+                    <td><a href="{{ url $dn.Url }}/ui/index.html">{{ $dn.Url }}</a>
+                        {{ if ne $dn.PublicUrl $dn.Url }}
+                        / <a href="{{ url $dn.PublicUrl }}/ui/index.html">{{ $dn.PublicUrl }}</a>
+                        {{ end }}
+                    </td>
+                    <td>{{ $dn.Volumes }}</td>
+                    <td>{{ $dn.VolumeIds}}</td>
+                    <td>{{ $dn.EcShards }}</td>
+                    <td>{{ $dn.Max }}</td>
+                </tr>
+                {{ end }}
+                {{ end }}
+                {{ end }}
+                </tbody>
+            </table>
+        </div>
     </div>
 
 </div>
