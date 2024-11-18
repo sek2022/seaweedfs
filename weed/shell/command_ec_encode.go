@@ -155,7 +155,8 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		if len(errors) > 0 {
 			return errors[0]
 		}
-
+		//sleep 5s
+		time.Sleep(5 * time.Second)
 		volumeIds, err = collectVolumeIdsForEcEncode(commandEnv, *collection, *fullPercentage, *quietPeriod)
 		if err != nil {
 			return err
