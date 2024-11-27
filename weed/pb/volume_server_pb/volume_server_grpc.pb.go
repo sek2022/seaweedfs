@@ -19,49 +19,50 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	VolumeServer_BatchDelete_FullMethodName                 = "/volume_server_pb.VolumeServer/BatchDelete"
-	VolumeServer_VacuumVolumeCheck_FullMethodName           = "/volume_server_pb.VolumeServer/VacuumVolumeCheck"
-	VolumeServer_VacuumVolumeCompact_FullMethodName         = "/volume_server_pb.VolumeServer/VacuumVolumeCompact"
-	VolumeServer_VacuumVolumeCommit_FullMethodName          = "/volume_server_pb.VolumeServer/VacuumVolumeCommit"
-	VolumeServer_VacuumVolumeCleanup_FullMethodName         = "/volume_server_pb.VolumeServer/VacuumVolumeCleanup"
-	VolumeServer_DeleteCollection_FullMethodName            = "/volume_server_pb.VolumeServer/DeleteCollection"
-	VolumeServer_AllocateVolume_FullMethodName              = "/volume_server_pb.VolumeServer/AllocateVolume"
-	VolumeServer_VolumeSyncStatus_FullMethodName            = "/volume_server_pb.VolumeServer/VolumeSyncStatus"
-	VolumeServer_VolumeIncrementalCopy_FullMethodName       = "/volume_server_pb.VolumeServer/VolumeIncrementalCopy"
-	VolumeServer_VolumeMount_FullMethodName                 = "/volume_server_pb.VolumeServer/VolumeMount"
-	VolumeServer_VolumeUnmount_FullMethodName               = "/volume_server_pb.VolumeServer/VolumeUnmount"
-	VolumeServer_VolumeDelete_FullMethodName                = "/volume_server_pb.VolumeServer/VolumeDelete"
-	VolumeServer_VolumeMarkReadonly_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeMarkReadonly"
-	VolumeServer_VolumeMarkWritable_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeMarkWritable"
-	VolumeServer_VolumeConfigure_FullMethodName             = "/volume_server_pb.VolumeServer/VolumeConfigure"
-	VolumeServer_VolumeStatus_FullMethodName                = "/volume_server_pb.VolumeServer/VolumeStatus"
-	VolumeServer_VolumeCopy_FullMethodName                  = "/volume_server_pb.VolumeServer/VolumeCopy"
-	VolumeServer_ReadVolumeFileStatus_FullMethodName        = "/volume_server_pb.VolumeServer/ReadVolumeFileStatus"
-	VolumeServer_CopyFile_FullMethodName                    = "/volume_server_pb.VolumeServer/CopyFile"
-	VolumeServer_UploadFile_FullMethodName                  = "/volume_server_pb.VolumeServer/UploadFile"
-	VolumeServer_ReadNeedleBlob_FullMethodName              = "/volume_server_pb.VolumeServer/ReadNeedleBlob"
-	VolumeServer_ReadNeedleMeta_FullMethodName              = "/volume_server_pb.VolumeServer/ReadNeedleMeta"
-	VolumeServer_WriteNeedleBlob_FullMethodName             = "/volume_server_pb.VolumeServer/WriteNeedleBlob"
-	VolumeServer_ReadAllNeedles_FullMethodName              = "/volume_server_pb.VolumeServer/ReadAllNeedles"
-	VolumeServer_VolumeTailSender_FullMethodName            = "/volume_server_pb.VolumeServer/VolumeTailSender"
-	VolumeServer_VolumeTailReceiver_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeTailReceiver"
-	VolumeServer_VolumeEcShardsGenerate_FullMethodName      = "/volume_server_pb.VolumeServer/VolumeEcShardsGenerate"
-	VolumeServer_VolumeEcShardsRebuild_FullMethodName       = "/volume_server_pb.VolumeServer/VolumeEcShardsRebuild"
-	VolumeServer_VolumeEcShardsCopy_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeEcShardsCopy"
-	VolumeServer_VolumeEcShardsDelete_FullMethodName        = "/volume_server_pb.VolumeServer/VolumeEcShardsDelete"
-	VolumeServer_VolumeEcShardsMount_FullMethodName         = "/volume_server_pb.VolumeServer/VolumeEcShardsMount"
-	VolumeServer_VolumeEcShardsUnmount_FullMethodName       = "/volume_server_pb.VolumeServer/VolumeEcShardsUnmount"
-	VolumeServer_VolumeEcShardRead_FullMethodName           = "/volume_server_pb.VolumeServer/VolumeEcShardRead"
-	VolumeServer_VolumeEcBlobDelete_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeEcBlobDelete"
-	VolumeServer_VolumeEcShardsToVolume_FullMethodName      = "/volume_server_pb.VolumeServer/VolumeEcShardsToVolume"
-	VolumeServer_VolumeTierMoveDatToRemote_FullMethodName   = "/volume_server_pb.VolumeServer/VolumeTierMoveDatToRemote"
-	VolumeServer_VolumeTierMoveDatFromRemote_FullMethodName = "/volume_server_pb.VolumeServer/VolumeTierMoveDatFromRemote"
-	VolumeServer_VolumeServerStatus_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeServerStatus"
-	VolumeServer_VolumeServerLeave_FullMethodName           = "/volume_server_pb.VolumeServer/VolumeServerLeave"
-	VolumeServer_FetchAndWriteNeedle_FullMethodName         = "/volume_server_pb.VolumeServer/FetchAndWriteNeedle"
-	VolumeServer_Query_FullMethodName                       = "/volume_server_pb.VolumeServer/Query"
-	VolumeServer_VolumeNeedleStatus_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeNeedleStatus"
-	VolumeServer_Ping_FullMethodName                        = "/volume_server_pb.VolumeServer/Ping"
+	VolumeServer_BatchDelete_FullMethodName                     = "/volume_server_pb.VolumeServer/BatchDelete"
+	VolumeServer_VacuumVolumeCheck_FullMethodName               = "/volume_server_pb.VolumeServer/VacuumVolumeCheck"
+	VolumeServer_VacuumVolumeCompact_FullMethodName             = "/volume_server_pb.VolumeServer/VacuumVolumeCompact"
+	VolumeServer_VacuumVolumeCommit_FullMethodName              = "/volume_server_pb.VolumeServer/VacuumVolumeCommit"
+	VolumeServer_VacuumVolumeCleanup_FullMethodName             = "/volume_server_pb.VolumeServer/VacuumVolumeCleanup"
+	VolumeServer_DeleteCollection_FullMethodName                = "/volume_server_pb.VolumeServer/DeleteCollection"
+	VolumeServer_AllocateVolume_FullMethodName                  = "/volume_server_pb.VolumeServer/AllocateVolume"
+	VolumeServer_VolumeSyncStatus_FullMethodName                = "/volume_server_pb.VolumeServer/VolumeSyncStatus"
+	VolumeServer_VolumeIncrementalCopy_FullMethodName           = "/volume_server_pb.VolumeServer/VolumeIncrementalCopy"
+	VolumeServer_VolumeMount_FullMethodName                     = "/volume_server_pb.VolumeServer/VolumeMount"
+	VolumeServer_VolumeUnmount_FullMethodName                   = "/volume_server_pb.VolumeServer/VolumeUnmount"
+	VolumeServer_VolumeDelete_FullMethodName                    = "/volume_server_pb.VolumeServer/VolumeDelete"
+	VolumeServer_VolumeMarkReadonly_FullMethodName              = "/volume_server_pb.VolumeServer/VolumeMarkReadonly"
+	VolumeServer_VolumeMarkWritable_FullMethodName              = "/volume_server_pb.VolumeServer/VolumeMarkWritable"
+	VolumeServer_VolumeConfigure_FullMethodName                 = "/volume_server_pb.VolumeServer/VolumeConfigure"
+	VolumeServer_VolumeStatus_FullMethodName                    = "/volume_server_pb.VolumeServer/VolumeStatus"
+	VolumeServer_VolumeCopy_FullMethodName                      = "/volume_server_pb.VolumeServer/VolumeCopy"
+	VolumeServer_ReadVolumeFileStatus_FullMethodName            = "/volume_server_pb.VolumeServer/ReadVolumeFileStatus"
+	VolumeServer_CopyFile_FullMethodName                        = "/volume_server_pb.VolumeServer/CopyFile"
+	VolumeServer_UploadFile_FullMethodName                      = "/volume_server_pb.VolumeServer/UploadFile"
+	VolumeServer_ReadNeedleBlob_FullMethodName                  = "/volume_server_pb.VolumeServer/ReadNeedleBlob"
+	VolumeServer_ReadNeedleMeta_FullMethodName                  = "/volume_server_pb.VolumeServer/ReadNeedleMeta"
+	VolumeServer_WriteNeedleBlob_FullMethodName                 = "/volume_server_pb.VolumeServer/WriteNeedleBlob"
+	VolumeServer_ReadAllNeedles_FullMethodName                  = "/volume_server_pb.VolumeServer/ReadAllNeedles"
+	VolumeServer_VolumeTailSender_FullMethodName                = "/volume_server_pb.VolumeServer/VolumeTailSender"
+	VolumeServer_VolumeTailReceiver_FullMethodName              = "/volume_server_pb.VolumeServer/VolumeTailReceiver"
+	VolumeServer_VolumeEcShardsGenerate_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeEcShardsGenerate"
+	VolumeServer_VolumeEcShardsRebuild_FullMethodName           = "/volume_server_pb.VolumeServer/VolumeEcShardsRebuild"
+	VolumeServer_VolumeEcShardsCopy_FullMethodName              = "/volume_server_pb.VolumeServer/VolumeEcShardsCopy"
+	VolumeServer_VolumeEcShardsDelete_FullMethodName            = "/volume_server_pb.VolumeServer/VolumeEcShardsDelete"
+	VolumeServer_VolumeEcShardsMount_FullMethodName             = "/volume_server_pb.VolumeServer/VolumeEcShardsMount"
+	VolumeServer_VolumeEcShardsUnmount_FullMethodName           = "/volume_server_pb.VolumeServer/VolumeEcShardsUnmount"
+	VolumeServer_VolumeEcShardRead_FullMethodName               = "/volume_server_pb.VolumeServer/VolumeEcShardRead"
+	VolumeServer_VolumeEcBlobDelete_FullMethodName              = "/volume_server_pb.VolumeServer/VolumeEcBlobDelete"
+	VolumeServer_VolumeEcShardsToVolume_FullMethodName          = "/volume_server_pb.VolumeServer/VolumeEcShardsToVolume"
+	VolumeServer_VolumeEcShardDataNodesForFileId_FullMethodName = "/volume_server_pb.VolumeServer/VolumeEcShardDataNodesForFileId"
+	VolumeServer_VolumeTierMoveDatToRemote_FullMethodName       = "/volume_server_pb.VolumeServer/VolumeTierMoveDatToRemote"
+	VolumeServer_VolumeTierMoveDatFromRemote_FullMethodName     = "/volume_server_pb.VolumeServer/VolumeTierMoveDatFromRemote"
+	VolumeServer_VolumeServerStatus_FullMethodName              = "/volume_server_pb.VolumeServer/VolumeServerStatus"
+	VolumeServer_VolumeServerLeave_FullMethodName               = "/volume_server_pb.VolumeServer/VolumeServerLeave"
+	VolumeServer_FetchAndWriteNeedle_FullMethodName             = "/volume_server_pb.VolumeServer/FetchAndWriteNeedle"
+	VolumeServer_Query_FullMethodName                           = "/volume_server_pb.VolumeServer/Query"
+	VolumeServer_VolumeNeedleStatus_FullMethodName              = "/volume_server_pb.VolumeServer/VolumeNeedleStatus"
+	VolumeServer_Ping_FullMethodName                            = "/volume_server_pb.VolumeServer/Ping"
 )
 
 // VolumeServerClient is the client API for VolumeServer service.
@@ -106,6 +107,7 @@ type VolumeServerClient interface {
 	VolumeEcShardRead(ctx context.Context, in *VolumeEcShardReadRequest, opts ...grpc.CallOption) (VolumeServer_VolumeEcShardReadClient, error)
 	VolumeEcBlobDelete(ctx context.Context, in *VolumeEcBlobDeleteRequest, opts ...grpc.CallOption) (*VolumeEcBlobDeleteResponse, error)
 	VolumeEcShardsToVolume(ctx context.Context, in *VolumeEcShardsToVolumeRequest, opts ...grpc.CallOption) (*VolumeEcShardsToVolumeResponse, error)
+	VolumeEcShardDataNodesForFileId(ctx context.Context, in *VolumeEcShardDataNodesForFileIdRequest, opts ...grpc.CallOption) (*VolumeEcShardDataNodesForFileIdResponse, error)
 	// tiered storage
 	VolumeTierMoveDatToRemote(ctx context.Context, in *VolumeTierMoveDatToRemoteRequest, opts ...grpc.CallOption) (VolumeServer_VolumeTierMoveDatToRemoteClient, error)
 	VolumeTierMoveDatFromRemote(ctx context.Context, in *VolumeTierMoveDatFromRemoteRequest, opts ...grpc.CallOption) (VolumeServer_VolumeTierMoveDatFromRemoteClient, error)
@@ -628,6 +630,15 @@ func (c *volumeServerClient) VolumeEcShardsToVolume(ctx context.Context, in *Vol
 	return out, nil
 }
 
+func (c *volumeServerClient) VolumeEcShardDataNodesForFileId(ctx context.Context, in *VolumeEcShardDataNodesForFileIdRequest, opts ...grpc.CallOption) (*VolumeEcShardDataNodesForFileIdResponse, error) {
+	out := new(VolumeEcShardDataNodesForFileIdResponse)
+	err := c.cc.Invoke(ctx, VolumeServer_VolumeEcShardDataNodesForFileId_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *volumeServerClient) VolumeTierMoveDatToRemote(ctx context.Context, in *VolumeTierMoveDatToRemoteRequest, opts ...grpc.CallOption) (VolumeServer_VolumeTierMoveDatToRemoteClient, error) {
 	stream, err := c.cc.NewStream(ctx, &VolumeServer_ServiceDesc.Streams[8], VolumeServer_VolumeTierMoveDatToRemote_FullMethodName, opts...)
 	if err != nil {
@@ -811,6 +822,7 @@ type VolumeServerServer interface {
 	VolumeEcShardRead(*VolumeEcShardReadRequest, VolumeServer_VolumeEcShardReadServer) error
 	VolumeEcBlobDelete(context.Context, *VolumeEcBlobDeleteRequest) (*VolumeEcBlobDeleteResponse, error)
 	VolumeEcShardsToVolume(context.Context, *VolumeEcShardsToVolumeRequest) (*VolumeEcShardsToVolumeResponse, error)
+	VolumeEcShardDataNodesForFileId(context.Context, *VolumeEcShardDataNodesForFileIdRequest) (*VolumeEcShardDataNodesForFileIdResponse, error)
 	// tiered storage
 	VolumeTierMoveDatToRemote(*VolumeTierMoveDatToRemoteRequest, VolumeServer_VolumeTierMoveDatToRemoteServer) error
 	VolumeTierMoveDatFromRemote(*VolumeTierMoveDatFromRemoteRequest, VolumeServer_VolumeTierMoveDatFromRemoteServer) error
@@ -933,6 +945,9 @@ func (UnimplementedVolumeServerServer) VolumeEcBlobDelete(context.Context, *Volu
 }
 func (UnimplementedVolumeServerServer) VolumeEcShardsToVolume(context.Context, *VolumeEcShardsToVolumeRequest) (*VolumeEcShardsToVolumeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VolumeEcShardsToVolume not implemented")
+}
+func (UnimplementedVolumeServerServer) VolumeEcShardDataNodesForFileId(context.Context, *VolumeEcShardDataNodesForFileIdRequest) (*VolumeEcShardDataNodesForFileIdResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VolumeEcShardDataNodesForFileId not implemented")
 }
 func (UnimplementedVolumeServerServer) VolumeTierMoveDatToRemote(*VolumeTierMoveDatToRemoteRequest, VolumeServer_VolumeTierMoveDatToRemoteServer) error {
 	return status.Errorf(codes.Unimplemented, "method VolumeTierMoveDatToRemote not implemented")
@@ -1630,6 +1645,24 @@ func _VolumeServer_VolumeEcShardsToVolume_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VolumeServer_VolumeEcShardDataNodesForFileId_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VolumeEcShardDataNodesForFileIdRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VolumeServerServer).VolumeEcShardDataNodesForFileId(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VolumeServer_VolumeEcShardDataNodesForFileId_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VolumeServerServer).VolumeEcShardDataNodesForFileId(ctx, req.(*VolumeEcShardDataNodesForFileIdRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _VolumeServer_VolumeTierMoveDatToRemote_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(VolumeTierMoveDatToRemoteRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1897,6 +1930,10 @@ var VolumeServer_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VolumeEcShardsToVolume",
 			Handler:    _VolumeServer_VolumeEcShardsToVolume_Handler,
+		},
+		{
+			MethodName: "VolumeEcShardDataNodesForFileId",
+			Handler:    _VolumeServer_VolumeEcShardDataNodesForFileId_Handler,
 		},
 		{
 			MethodName: "VolumeServerStatus",

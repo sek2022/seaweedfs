@@ -3,6 +3,7 @@ package weed_server
 import (
 	"context"
 	"fmt"
+	"github.com/seaweedfs/seaweedfs/weed/wdclient"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -94,17 +95,22 @@ func (fs *FilerServer) LookupVolume(ctx context.Context, req *filer_pb.LookupVol
 		LocationsMap: make(map[string]*filer_pb.Locations),
 	}
 
-	for _, vidString := range req.VolumeIds {
-		vid, err := strconv.Atoi(vidString)
+	for _, vOrFidString := range req.VolumeIds {
+		vidStr, _ := wdclient.VolumeId(vOrFidString)
+		vid, err := strconv.Atoi(vidStr)
 		if err != nil {
 			glog.V(1).Infof("Unknown volume id %d", vid)
 			return nil, err
 		}
 		var locs []*filer_pb.Location
-		locations, found := fs.filer.MasterClient.GetLocations(uint32(vid))
-		if !found {
-			continue
+		locations, err := fs.filer.MasterClient.LookupFileIdLocationsWithFallback(vOrFidString)
+		if err != nil {
+			return nil, err
 		}
+		//locations, found := fs.filer.MasterClient.GetVolumeOrFileIdLocations(vOrFidString, fs.filer.GrpcDialOption)
+		//if !found {
+		//	continue
+		//}
 		for _, loc := range locations {
 			locs = append(locs, &filer_pb.Location{
 				Url:        loc.Url,
@@ -113,7 +119,7 @@ func (fs *FilerServer) LookupVolume(ctx context.Context, req *filer_pb.LookupVol
 				DataCenter: loc.DataCenter,
 			})
 		}
-		resp.LocationsMap[vidString] = &filer_pb.Locations{
+		resp.LocationsMap[vOrFidString] = &filer_pb.Locations{
 			Locations: locs,
 		}
 	}

@@ -67,8 +67,8 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 	//glog.V(4).Infoln("volume", volumeId, "reading", n)
 
 	hasVolume := vs.store.HasVolume(volumeId)
-	_, hasEcVolume := vs.store.FindEcVolume(volumeId)
-	fmt.Println("-----hasVolume", hasVolume, ",hasEcVolume:", hasEcVolume, ",volumeId:", volumeId, ",from:", r.RemoteAddr, ",path:", r.URL.Path)
+	ecVolumes, hasEcVolume := vs.store.FindEcVolume(volumeId)
+	fmt.Println("-----hasVolume", hasVolume, ",hasEcVolume:", hasEcVolume, ",volumeId:", volumeId, ",from:", r.RemoteAddr, ",path:", r.URL.Path, ",ecVolumes:", ecVolumes)
 	if !hasVolume && !hasEcVolume {
 		if vs.ReadMode == "local" {
 			glog.V(0).Infoln("volume is not local:", err, r.URL.Path)

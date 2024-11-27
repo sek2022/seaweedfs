@@ -194,17 +194,17 @@ func (t *Topology) MaybeLeader() (l pb.ServerAddress, err error) {
 	return
 }
 
-func (t *Topology) Lookup(collection string, vid needle.VolumeId) (dataNodes []*DataNode) {
+func (t *Topology) Lookup(collection string, vid needle.VolumeId) (dataNodes []*DataNode, ec bool) {
 	// maybe an issue if lots of collections?
 	if collection == "" {
 		for _, c := range t.collectionMap.Items() {
 			if list := c.(*Collection).Lookup(vid); list != nil {
-				return list
+				return list, false
 			}
 		}
 	} else {
 		if c, ok := t.collectionMap.Find(collection); ok {
-			return c.(*Collection).Lookup(vid)
+			return c.(*Collection).Lookup(vid), false
 		}
 	}
 
@@ -212,10 +212,10 @@ func (t *Topology) Lookup(collection string, vid needle.VolumeId) (dataNodes []*
 		for _, loc := range locations.Locations {
 			dataNodes = append(dataNodes, loc...)
 		}
-		return dataNodes
+		return dataNodes, true
 	}
 
-	return nil
+	return nil, false
 }
 
 func (t *Topology) NextVolumeId() (needle.VolumeId, error) {

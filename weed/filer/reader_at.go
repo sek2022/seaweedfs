@@ -30,28 +30,28 @@ func LookupFn(filerClient filer_pb.FilerClient) wdclient.LookupFileIdFunctionTyp
 	vidCache := make(map[string]*filer_pb.Locations)
 	var vicCacheLock sync.RWMutex
 	return func(fileId string) (targetUrls []string, err error) {
-		vid := VolumeId(fileId)
+		//vid := VolumeId(fileId)
 		vicCacheLock.RLock()
-		locations, found := vidCache[vid]
+		locations, found := vidCache[fileId]
 		vicCacheLock.RUnlock()
 
 		if !found {
-			util.Retry("lookup volume "+vid, func() error {
+			util.Retry("lookup volume "+fileId, func() error {
 				err = filerClient.WithFilerClient(false, func(client filer_pb.SeaweedFilerClient) error {
 					resp, err := client.LookupVolume(context.Background(), &filer_pb.LookupVolumeRequest{
-						VolumeIds: []string{vid},
+						VolumeIds: []string{fileId},
 					})
 					if err != nil {
 						return err
 					}
 
-					locations = resp.LocationsMap[vid]
+					locations = resp.LocationsMap[fileId]
 					if locations == nil || len(locations.Locations) == 0 {
 						glog.V(0).Infof("failed to locate %s", fileId)
 						return fmt.Errorf("failed to locate %s", fileId)
 					}
 					vicCacheLock.Lock()
-					vidCache[vid] = locations
+					vidCache[fileId] = locations
 					vicCacheLock.Unlock()
 
 					return nil

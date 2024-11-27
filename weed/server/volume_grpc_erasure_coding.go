@@ -534,3 +534,65 @@ func (vs *VolumeServer) VolumeEcShardsToVolume(ctx context.Context, req *volume_
 
 	return &volume_server_pb.VolumeEcShardsToVolumeResponse{}, nil
 }
+
+func (vs *VolumeServer) VolumeEcShardDataNodesForFileId(ctx context.Context, req *volume_server_pb.VolumeEcShardDataNodesForFileIdRequest) (*volume_server_pb.VolumeEcShardDataNodesForFileIdResponse, error) {
+	if len(req.FileIds) <= 0 {
+		return nil, fmt.Errorf("request fileIds is null")
+	}
+
+	fileDataNodesMap := make(map[string]*volume_server_pb.EcShardIds)
+	for _, fileId := range req.FileIds {
+		commaSep := strings.Index(fileId, ",")
+		if commaSep < 0 {
+			return nil, fmt.Errorf("fileId format error: %s, fileIds:%v", fileId, req.FileIds)
+		}
+		vid := fileId[0:commaSep]
+		fid := fileId[commaSep+1:]
+
+		volumeId, err := needle.NewVolumeId(vid)
+		if err != nil {
+			glog.V(2).Infof("parsing vid %s: %v", vid, err)
+			return nil, fmt.Errorf("parsing vid %s: %v", vid, err)
+		}
+		n := new(needle.Needle)
+		err = n.ParsePath(fid)
+		if err != nil {
+			glog.V(2).Infof("parsing fid %s: %v", fileId, err)
+			return nil, fmt.Errorf("parsing fid %s: %v", fileId, err)
+		}
+
+		ecVolume, hasEcVolume := vs.store.FindEcVolume(volumeId)
+
+		if !hasEcVolume {
+			return nil, fmt.Errorf("not found ec volumes for fileId: %s", fileId)
+		}
+		if ecVolume.Collection != req.Collection {
+			return nil, fmt.Errorf("existing collection:%v unexpected input: %v", ecVolume.Collection, req.Collection)
+		}
+		_, _, intervals, err := ecVolume.LocateEcShardNeedle(n.Id, ecVolume.Version)
+		if err != nil {
+			return nil, fmt.Errorf("FileId error:%s, %v", fileId, err)
+		}
+		fileEcIds := volume_server_pb.EcShardIds{}
+		fmt.Println("-----intervals:", intervals, ",volumeId:", volumeId)
+		for _, interval := range intervals {
+			shardId, _ := interval.ToShardIdAndOffset(erasure_coding.ErasureCodingLargeBlockSize, erasure_coding.ErasureCodingSmallBlockSize)
+			fmt.Println("-----shardId:", shardId, ",ecVolume.ShardLocations:", ecVolume.ShardLocations)
+			fileEcIds.ShardIds = append(fileEcIds.ShardIds, uint32(shardId))
+			//if shard, found := ecVolume.FindEcVolumeShard(shardId); found {
+			//
+			//}
+			//ecVolume.ShardLocationsLock.RLock()
+			//sourceDataNodes, hasShardIdLocation := ecVolume.ShardLocations[shardId]
+			//ecVolume.ShardLocationsLock.RUnlock()
+			//if hasShardIdLocation && len(sourceDataNodes) > 0 {
+			//	for _, node := range sourceDataNodes {
+			//		fileDataNodes.DataNode = append(fileDataNodes.DataNode, node.ToHttpAddress())
+			//	}
+			//}
+		}
+		fmt.Println("-----fileDataNodes:", fileEcIds.ShardIds)
+		fileDataNodesMap[fileId] = &fileEcIds
+	}
+	return &volume_server_pb.VolumeEcShardDataNodesForFileIdResponse{FileShardIds: fileDataNodesMap}, nil
+}

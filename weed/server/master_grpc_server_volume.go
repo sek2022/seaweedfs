@@ -149,14 +149,15 @@ func (ms *MasterServer) ProcessGrowRequest() {
 func (ms *MasterServer) LookupVolume(ctx context.Context, req *master_pb.LookupVolumeRequest) (*master_pb.LookupVolumeResponse, error) {
 
 	resp := &master_pb.LookupVolumeResponse{}
+
 	volumeLocations := ms.lookupVolumeId(req.VolumeOrFileIds, req.Collection)
 
 	for _, volumeOrFileId := range req.VolumeOrFileIds {
 		vid := volumeOrFileId
 		commaSep := strings.Index(vid, ",")
-		if commaSep > 0 {
-			vid = vid[0:commaSep]
-		}
+		//if commaSep > 0 {
+		//	vid = vid[0:commaSep]
+		//}
 		if result, found := volumeLocations[vid]; found {
 			var locations []*master_pb.Location
 			for _, loc := range result.Locations {
@@ -297,7 +298,7 @@ func (ms *MasterServer) VolumeMarkReadonly(ctx context.Context, req *master_pb.V
 
 	replicaPlacement, _ := super_block.NewReplicaPlacementFromByte(byte(req.ReplicaPlacement))
 	vl := ms.Topo.GetVolumeLayout(req.Collection, replicaPlacement, needle.LoadTTLFromUint32(req.Ttl), types.ToDiskType(req.DiskType))
-	dataNodes := ms.Topo.Lookup(req.Collection, needle.VolumeId(req.VolumeId))
+	dataNodes, _ := ms.Topo.Lookup(req.Collection, needle.VolumeId(req.VolumeId))
 
 	for _, dn := range dataNodes {
 		if dn.Ip == req.Ip && dn.Port == int(req.Port) {

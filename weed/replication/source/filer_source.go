@@ -56,7 +56,6 @@ func (fs *FilerSource) DoInitialize(address, grpcAddress string, dir string, rea
 }
 
 func (fs *FilerSource) LookupFileId(part string) (fileUrls []string, err error) {
-
 	vid2Locations := make(map[string]*filer_pb.Locations)
 
 	vid := volumeId(part)
