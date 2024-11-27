@@ -175,6 +175,8 @@ func (s *SingleChunkCacher) startCaching() {
 		return
 	}
 
+	fmt.Println("-----777,reader_cache.go,", s.chunkFileId, ",urlStrings:", urlStrings)
+
 	s.data = mem.Allocate(s.chunkSize)
 
 	_, s.err = util_http.RetriedFetchChunkData(s.data, urlStrings, s.cipherKey, s.isGzipped, true, 0)
