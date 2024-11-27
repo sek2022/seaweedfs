@@ -566,9 +566,9 @@ func (vs *VolumeServer) VolumeEcShardDataNodesForFileId(ctx context.Context, req
 		if !hasEcVolume {
 			return nil, fmt.Errorf("not found ec volumes for fileId: %s", fileId)
 		}
-		if ecVolume.Collection != req.Collection {
-			return nil, fmt.Errorf("existing collection:%v unexpected input: %v", ecVolume.Collection, req.Collection)
-		}
+		//if ecVolume.Collection != req.Collection {
+		//	return nil, fmt.Errorf("existing collection:%v unexpected input: %v", ecVolume.Collection, req.Collection)
+		//}
 		_, _, intervals, err := ecVolume.LocateEcShardNeedle(n.Id, ecVolume.Version)
 		if err != nil {
 			return nil, fmt.Errorf("FileId error:%s, %v", fileId, err)
