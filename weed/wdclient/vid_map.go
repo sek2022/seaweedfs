@@ -225,7 +225,7 @@ func (vc *vidMap) GetVolumeOrFileIdLocations(fileOrVolumeId string, grpcDialOpti
 	selectedLocs := locations
 	if found && len(locations) > 0 {
 		if ec && isFile {
-			fmt.Println("-----vid_map.go GetVolumeOrFileIdLocations")
+			//fmt.Println("-----vid_map.go GetVolumeOrFileIdLocations")
 			var fileEcShardIds map[string]*volume_server_pb.EcShardIds
 			var hasLoopVolumeServerUrls = make(map[string]string)
 			for _, loc := range locations {
@@ -257,7 +257,7 @@ func (vc *vidMap) GetVolumeOrFileIdLocations(fileOrVolumeId string, grpcDialOpti
 			}
 
 			if len(fileEcShardIds) > 0 && fileEcShardIds[fileOrVolumeId] != nil {
-				fmt.Println("-----fileId:", fileOrVolumeId, " is a ec file,fileDataNodes[fileOrVolumeId].DataNode:", fileEcShardIds[fileOrVolumeId].ShardIds)
+				//fmt.Println("-----fileId:", fileOrVolumeId, " is a ec file,fileDataNodes[fileOrVolumeId].DataNode:", fileEcShardIds[fileOrVolumeId].ShardIds)
 				selectedLocs = make([]Location, 0)
 				for sid, loc := range locations {
 					for _, shardId := range fileEcShardIds[fileOrVolumeId].ShardIds {

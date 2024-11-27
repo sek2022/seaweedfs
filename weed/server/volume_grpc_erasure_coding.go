@@ -574,10 +574,10 @@ func (vs *VolumeServer) VolumeEcShardDataNodesForFileId(ctx context.Context, req
 			return nil, fmt.Errorf("FileId error:%s, %v", fileId, err)
 		}
 		fileEcIds := volume_server_pb.EcShardIds{}
-		fmt.Println("-----intervals:", intervals, ",volumeId:", volumeId)
+		//fmt.Println("-----intervals:", intervals, ",volumeId:", volumeId)
 		for _, interval := range intervals {
 			shardId, _ := interval.ToShardIdAndOffset(erasure_coding.ErasureCodingLargeBlockSize, erasure_coding.ErasureCodingSmallBlockSize)
-			fmt.Println("-----shardId:", shardId, ",ecVolume.ShardLocations:", ecVolume.ShardLocations)
+			//fmt.Println("-----shardId:", shardId, ",ecVolume.ShardLocations:", ecVolume.ShardLocations)
 			fileEcIds.ShardIds = append(fileEcIds.ShardIds, uint32(shardId))
 			//if shard, found := ecVolume.FindEcVolumeShard(shardId); found {
 			//
@@ -591,7 +591,7 @@ func (vs *VolumeServer) VolumeEcShardDataNodesForFileId(ctx context.Context, req
 			//	}
 			//}
 		}
-		fmt.Println("-----fileDataNodes:", fileEcIds.ShardIds)
+		//fmt.Println("-----fileDataNodes:", fileEcIds.ShardIds)
 		fileDataNodesMap[fileId] = &fileEcIds
 	}
 	return &volume_server_pb.VolumeEcShardDataNodesForFileIdResponse{FileShardIds: fileDataNodesMap}, nil

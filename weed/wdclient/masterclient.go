@@ -63,7 +63,7 @@ func (mc *MasterClient) LookupFileIdWithFallback(fileId string) (fullUrls []stri
 		return
 	}
 
-	fmt.Println("-----999 LookupFileIdWithFallback:", fileId)
+	//fmt.Println("-----999 LookupFileIdWithFallback:", fileId)
 	fullUrls = make([]string, 0)
 	err = pb.WithMasterClient(false, mc.GetMaster(context.Background()), mc.grpcDialOption, false, func(client master_pb.SeaweedClient) error {
 		resp, err := client.LookupVolume(context.Background(), &master_pb.LookupVolumeRequest{

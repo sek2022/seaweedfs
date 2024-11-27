@@ -67,8 +67,8 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 	//glog.V(4).Infoln("volume", volumeId, "reading", n)
 
 	hasVolume := vs.store.HasVolume(volumeId)
-	ecVolumes, hasEcVolume := vs.store.FindEcVolume(volumeId)
-	fmt.Println("-----hasVolume", hasVolume, ",hasEcVolume:", hasEcVolume, ",volumeId:", volumeId, ",from:", r.RemoteAddr, ",path:", r.URL.Path, ",ecVolumes:", ecVolumes)
+	_, hasEcVolume := vs.store.FindEcVolume(volumeId)
+	//fmt.Println("-----hasVolume", hasVolume, ",hasEcVolume:", hasEcVolume, ",volumeId:", volumeId, ",from:", r.RemoteAddr, ",path:", r.URL.Path, ",ecVolumes:", ecVolumes)
 	if !hasVolume && !hasEcVolume {
 		if vs.ReadMode == "local" {
 			glog.V(0).Infoln("volume is not local:", err, r.URL.Path)
@@ -76,7 +76,7 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		lookupResult, err := operation.LookupVolumeId(vs.GetMaster, vs.grpcDialOption, volumeId.String())
-		fmt.Println("-----volume", volumeId, "found on", lookupResult, "error", err)
+		//fmt.Println("-----volume", volumeId, "found on", lookupResult, "error", err)
 		glog.V(2).Infoln("volume", volumeId, "found on", lookupResult, "error", err)
 		if err != nil || len(lookupResult.Locations) <= 0 {
 			glog.V(0).Infoln("lookup error:", err, r.URL.Path)
