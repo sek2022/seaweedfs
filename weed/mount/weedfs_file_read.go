@@ -3,10 +3,9 @@ package mount
 import (
 	"bytes"
 	"fmt"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/seaweedfs/seaweedfs/weed/util"
 	"io"
-
-	"github.com/hanwen/go-fuse/v2/fuse"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 )
@@ -46,7 +45,10 @@ func (wfs *WFS) Read(cancel <-chan struct{}, in *fuse.ReadIn, buff []byte) (fuse
 	defer fh.wfs.fhLockTable.ReleaseLock(fh.fh, fhActiveLock)
 
 	offset := int64(in.Offset)
+	//t1 := time.Now().UnixMilli()
 	totalRead, err := readDataByFileHandle(buff, fh, offset)
+	//t2 := time.Now().UnixMilli()
+	//fmt.Println("-----weeds_file_read.go offset:", offset, ",times:", t2-t1)
 	if err != nil {
 		glog.Warningf("file handle read %s %d: %v", fh.FullPath(), totalRead, err)
 		return nil, fuse.EIO

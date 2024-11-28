@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/seaweedfs/seaweedfs/weed/filer"
 	"github.com/seaweedfs/seaweedfs/weed/glog"
@@ -59,14 +60,15 @@ func (fh *FileHandle) readFromChunks(buff []byte, offset int64) (int64, int64, e
 		glog.V(4).Infof("file handle read cached %s [%d,%d] %d", fileFullPath, offset, offset+int64(totalRead), totalRead)
 		return int64(totalRead), 0, nil
 	}
-
+	t1 := time.Now().UnixMilli()
 	totalRead, ts, err := fh.entryChunkGroup.ReadDataAt(fileSize, buff, offset)
-
+	t2 := time.Now().UnixMilli()
+	//fmt.Println("-----offset:", offset, ",totalRead:", totalRead, ",times:", t2-t1, ",path:", fileFullPath)
 	if err != nil && err != io.EOF {
 		glog.Errorf("file handle read %s: %v", fileFullPath, err)
 	}
 
-	// glog.V(4).Infof("file handle read %s [%d,%d] %d : %v", fileFullPath, offset, offset+int64(totalRead), totalRead, err)
+	glog.V(0).Infof("file handle read %s [%d,%d] %d : %v, times:%d", fileFullPath, offset, offset+int64(totalRead), totalRead, err, t2-t1)
 
 	return int64(totalRead), ts, err
 }

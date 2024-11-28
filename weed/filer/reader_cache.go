@@ -179,8 +179,8 @@ func (s *SingleChunkCacher) startCaching() {
 
 	_, s.err = util_http.RetriedFetchChunkData(s.data, urlStrings, s.cipherKey, s.isGzipped, true, 0)
 	st03 := time.Now().UnixMilli()
-	fmt.Println("-----777,reader_cache.go,", s.chunkFileId, ",urlStrings:", urlStrings,
-		"gzip", s.isGzipped, ",total timeMilli:", st03-st01, ",lookupFileIdFn milli:", st02-st01)
+	glog.V(0).Infof("-----chunkFileId:%s, urlStrings:%s, gzip:%v,total timeMilli:%d, lookupFileIdFn milli:%d, chukSize:%d,shouldCache:%v",
+		s.chunkFileId, urlStrings, s.isGzipped, st03-st01, st02-st01, s.chunkSize, s.shouldCache)
 
 	if s.err != nil {
 		mem.Free(s.data)
