@@ -116,12 +116,19 @@ func fetchWholeChunk(bytesBuffer *bytes.Buffer, lookupFileIdFn wdclient.LookupFi
 }
 
 func fetchChunkRange(buffer []byte, lookupFileIdFn wdclient.LookupFileIdFunctionType, fileId string, cipherKey []byte, isGzipped bool, offset int64) (int, error) {
+	st01 := time.Now().UnixMilli()
 	urlStrings, err := lookupFileIdFn(fileId)
 	if err != nil {
 		glog.Errorf("operation LookupFileId %s failed, err: %v", fileId, err)
 		return 0, err
 	}
-	return util_http.RetriedFetchChunkData(buffer, urlStrings, cipherKey, isGzipped, false, offset)
+	st02 := time.Now().UnixMilli()
+	n, err := util_http.RetriedFetchChunkData(buffer, urlStrings, cipherKey, isGzipped, false, offset)
+	st03 := time.Now().UnixMilli()
+	glog.V(0).Infof("-----fetchChunkRange chunkFileId:%s, urlStrings:%s, gzip:%v,total timeMilli:%d, lookupFileIdFn milli:%d, offset:%d,size:%v",
+		fileId, urlStrings, isGzipped, st03-st01, st02-st01, offset, n)
+
+	return n, err
 }
 
 func retriedStreamFetchChunkData(writer io.Writer, urlStrings []string, jwt string, cipherKey []byte, isGzipped bool, isFullChunk bool, offset int64, size int) (err error) {

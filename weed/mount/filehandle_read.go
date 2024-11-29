@@ -63,12 +63,12 @@ func (fh *FileHandle) readFromChunks(buff []byte, offset int64) (int64, int64, e
 	t1 := time.Now().UnixMilli()
 	totalRead, ts, err := fh.entryChunkGroup.ReadDataAt(fileSize, buff, offset)
 	t2 := time.Now().UnixMilli()
-	//fmt.Println("-----offset:", offset, ",totalRead:", totalRead, ",times:", t2-t1, ",path:", fileFullPath)
 	if err != nil && err != io.EOF {
 		glog.Errorf("file handle read %s: %v", fileFullPath, err)
 	}
-
-	glog.V(0).Infof("file handle read %s [%d,%d] %d : %v, times:%d", fileFullPath, offset, offset+int64(totalRead), totalRead, err, t2-t1)
+	if t2-t1 > 50 {
+		glog.V(0).Infof("-----file handle read %s,fileSize:%d, [%d,%d] %d : %v, times:%d", fileFullPath, fileSize, offset, offset+int64(totalRead), totalRead, err, t2-t1)
+	}
 
 	return int64(totalRead), ts, err
 }
