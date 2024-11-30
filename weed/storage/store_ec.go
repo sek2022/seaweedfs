@@ -3,12 +3,13 @@ package storage
 import (
 	"context"
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/pb"
-	"golang.org/x/exp/slices"
 	"io"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/seaweedfs/seaweedfs/weed/pb"
+	"golang.org/x/exp/slices"
 
 	"github.com/klauspost/reedsolomon"
 
@@ -203,14 +204,16 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 	t1 := time.Now().UnixMilli()
 	if shard, found := ecVolume.FindEcVolumeShard(shardId); found {
 		//fmt.Println("-----ok needleId", needleId, ",volume:", ecVolume.VolumeId, ",shardId:", shardId, ",interval:", interval.BlockIndex)
+		shard.DataFileAccessLock.RLock()
+		defer shard.DataFileAccessLock.RUnlock()
+		t2 := time.Now().UnixMilli()
 		if _, err = shard.ReadAt(data, actualOffset); err != nil {
 			glog.V(0).Infof("read local ec shard %d.%d offset %d: %v", ecVolume.VolumeId, shardId, actualOffset, err)
 			return
 		}
-		t2 := time.Now().UnixMilli()
-		if t2-t1 > 10 {
-			glog.V(0).Infof("read local ec shard %d.%d offset %d, time: %d", ecVolume.VolumeId, shardId, actualOffset, t2-t1)
-		}
+		t3 := time.Now().UnixMilli()
+		glog.V(0).Infof("read local ec shard locked %d.%d offset %d, total time: %d, read time: %d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2)
+
 	} else {
 		ecVolume.ShardLocationsLock.RLock()
 		sourceDataNodes, hasShardIdLocation := ecVolume.ShardLocations[shardId]

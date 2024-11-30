@@ -6,6 +6,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/seaweedfs/seaweedfs/weed/stats"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
@@ -15,13 +16,14 @@ import (
 type ShardId uint8
 
 type EcVolumeShard struct {
-	VolumeId    needle.VolumeId
-	ShardId     ShardId
-	Collection  string
-	dir         string
-	ecdFile     *os.File
-	ecdFileSize int64
-	DiskType    types.DiskType
+	VolumeId           needle.VolumeId
+	ShardId            ShardId
+	Collection         string
+	dir                string
+	ecdFile            *os.File
+	ecdFileSize        int64
+	DiskType           types.DiskType
+	DataFileAccessLock sync.RWMutex
 }
 
 func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string, id needle.VolumeId, shardId ShardId) (v *EcVolumeShard, e error) {
