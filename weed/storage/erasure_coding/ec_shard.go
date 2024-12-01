@@ -51,7 +51,8 @@ func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string
 	stats.VolumeServerVolumeGauge.WithLabelValues(v.Collection, "ec_shards").Inc()
 	v.bufferPool = &sync.Pool{
 		New: func() interface{} {
-			buf := make([]byte, 4096) // 或其他合适的大小
+			// 增加到 1MB 的缓冲区
+			buf := make([]byte, 1<<20)
 			return &buf
 		},
 	}
@@ -101,23 +102,34 @@ func (shard *EcVolumeShard) Destroy() {
 }
 
 func (shard *EcVolumeShard) ReadAt(buf []byte, offset int64) (int, error) {
-	// 使用buffer pool
-	tmpBufPtr := shard.bufferPool.Get().(*[]byte)
-	defer shard.bufferPool.Put(tmpBufPtr)
-	tmpBuf := *tmpBufPtr
-
 	// 计算对齐读取
 	alignedOffset := offset &^ 4095         // 4KB对齐
 	readSize := ((len(buf) + 4095) &^ 4095) // 向上对齐到4KB
 
-	// 使用pread直接读取,避免seek
+	var tmpBuf []byte
+	if readSize <= 1<<20 { // 1MB以内使用pool
+		tmpBufPtr := shard.bufferPool.Get().(*[]byte)
+		defer shard.bufferPool.Put(tmpBufPtr)
+		tmpBuf = *tmpBufPtr
+
+		// 确保容量足够
+		if cap(tmpBuf) < readSize {
+			tmpBuf = make([]byte, readSize)
+			*tmpBufPtr = tmpBuf // 更新pool中的buffer
+		}
+	} else {
+		// 大于1MB直接分配
+		tmpBuf = make([]byte, readSize)
+	}
+
+	// 使用pread直接读取
 	_, err := unix.Pread(int(shard.ecdFile.Fd()), tmpBuf[:readSize], alignedOffset)
 	if err != nil {
 		return 0, err
 	}
 
 	// 复制需要的部分
-	copy(buf, tmpBuf[offset-alignedOffset:])
+	copy(buf, tmpBuf[offset-alignedOffset:offset-alignedOffset+int64(len(buf))])
 	return len(buf), nil
 	//return shard.ecdFile.ReadAt(buf, offset)
 
