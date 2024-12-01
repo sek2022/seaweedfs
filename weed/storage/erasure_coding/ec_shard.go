@@ -106,31 +106,31 @@ func (shard *EcVolumeShard) ReadAt(buf []byte, offset int64) (int, error) {
 	alignedOffset := offset &^ 4095         // 4KB对齐
 	readSize := ((len(buf) + 4095) &^ 4095) // 向上对齐到4KB
 
-	var tmpBuf []byte
-	if readSize <= 1<<20 { // 1MB以内使用pool
-		tmpBufPtr := shard.bufferPool.Get().(*[]byte)
-		defer shard.bufferPool.Put(tmpBufPtr)
-		tmpBuf = *tmpBufPtr
-
-		// 确保容量足够
-		if cap(tmpBuf) < readSize {
-			tmpBuf = make([]byte, readSize)
-			*tmpBufPtr = tmpBuf // 更新pool中的buffer
-		}
-	} else {
-		// 大于1MB直接分配
-		tmpBuf = make([]byte, readSize)
-	}
+	// 直接分配所需大小的临时缓冲区
+	tmpBuf := make([]byte, readSize)
 
 	// 使用pread直接读取
-	_, err := unix.Pread(int(shard.ecdFile.Fd()), tmpBuf[:readSize], alignedOffset)
+	n, err := unix.Pread(int(shard.ecdFile.Fd()), tmpBuf, alignedOffset)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("pread error: %v", err)
+	}
+	if n < len(buf) {
+		return 0, fmt.Errorf("short read: got %d bytes, want %d bytes", n, len(buf))
 	}
 
-	// 复制需要的部分
-	copy(buf, tmpBuf[offset-alignedOffset:offset-alignedOffset+int64(len(buf))])
-	return len(buf), nil
+	// 计算实际需要复制的长度
+	copyLen := len(buf)
+	if offset-alignedOffset+int64(copyLen) > int64(n) {
+		copyLen = int(int64(n) - (offset - alignedOffset))
+	}
+
+	// 安全复制
+	if copyLen <= 0 {
+		return 0, fmt.Errorf("invalid copy length: %d", copyLen)
+	}
+	copy(buf[:copyLen], tmpBuf[offset-alignedOffset:offset-alignedOffset+int64(copyLen)])
+
+	return copyLen, nil
 	//return shard.ecdFile.ReadAt(buf, offset)
 
 }
