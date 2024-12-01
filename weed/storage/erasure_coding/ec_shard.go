@@ -25,7 +25,6 @@ type EcVolumeShard struct {
 	ecdFileSize        int64
 	DiskType           types.DiskType
 	DataFileAccessLock sync.RWMutex
-	bufferPool         *sync.Pool
 }
 
 func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string, id needle.VolumeId, shardId ShardId) (v *EcVolumeShard, e error) {
@@ -49,13 +48,6 @@ func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string
 	v.ecdFileSize = ecdFi.Size()
 
 	stats.VolumeServerVolumeGauge.WithLabelValues(v.Collection, "ec_shards").Inc()
-	v.bufferPool = &sync.Pool{
-		New: func() interface{} {
-			// 增加到 1MB 的缓冲区
-			buf := make([]byte, 1<<20)
-			return &buf
-		},
-	}
 	return
 }
 
