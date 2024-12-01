@@ -199,7 +199,17 @@ func (s *Store) readEcShardIntervals(vid needle.VolumeId, needleId types.NeedleI
 }
 
 func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasure_coding.EcVolume, interval erasure_coding.Interval) (data []byte, is_deleted bool, err error) {
+	// 构造缓存key
+	cacheKey := fmt.Sprintf("ec:%d:%d:%d", ecVolume.VolumeId, interval.BlockIndex, needleId)
 	shardId, actualOffset := interval.ToShardIdAndOffset(erasure_coding.ErasureCodingLargeBlockSize, erasure_coding.ErasureCodingSmallBlockSize)
+
+	// 检查缓存
+	if item := s.ecReadCache.cache.Get(cacheKey); item != nil && !item.Expired() {
+		glog.V(0).Infof("read local ec shard %d.%d offset %d, from cache,key ：%s", ecVolume.VolumeId, shardId, actualOffset, cacheKey)
+
+		return item.Value().([]byte), false, nil
+	}
+
 	data = make([]byte, interval.Size)
 	t1 := time.Now().UnixMilli()
 	if shard, found := ecVolume.FindEcVolumeShard(shardId); found {
@@ -208,11 +218,15 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 		defer shard.DataFileAccessLock.RUnlock()
 		t2 := time.Now().UnixMilli()
 		if _, err = shard.ReadAt(data, actualOffset); err != nil {
+
 			glog.V(0).Infof("read local ec shard %d.%d offset %d: %v", ecVolume.VolumeId, shardId, actualOffset, err)
 			return
 		}
+
+		// 写入缓存
+		s.ecReadCache.cache.Set(cacheKey, data, 10*time.Minute)
 		t3 := time.Now().UnixMilli()
-		glog.V(0).Infof("read local ec shard locked %d.%d offset %d, total time: %d, read time: %d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2)
+		glog.V(0).Infof("read local ec shard and cache %d.%d offset %d, total time: %d, read time: %d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2)
 
 	} else {
 		ecVolume.ShardLocationsLock.RLock()

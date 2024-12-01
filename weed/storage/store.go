@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/karlseguin/ccache/v2"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/volume_info"
 	"github.com/seaweedfs/seaweedfs/weed/util"
@@ -73,6 +74,23 @@ type Store struct {
 	NewEcShardsChan     chan master_pb.VolumeEcShardInformationMessage
 	DeletedEcShardsChan chan master_pb.VolumeEcShardInformationMessage
 	isStopping          bool
+	ecReadCache         *EcReadCache
+}
+
+type EcReadCache struct {
+	cache    *ccache.Cache
+	pageSize int64
+}
+
+func NewEcReadCache() *EcReadCache {
+	return &EcReadCache{
+		cache: ccache.New(ccache.Configure().
+			MaxSize(2000).     // 缓存2000个块
+			ItemsToPrune(500). // 每次清理500条
+			GetsPerPromote(3). // 访问3次后提升
+			Buckets(512)),     // 使用512个bucket
+		pageSize: 256 * 1024, // 256KB per page
+	}
 }
 
 func (s *Store) String() (str string) {
@@ -104,7 +122,7 @@ func NewStore(grpcDialOption grpc.DialOption, ip string, port int, grpcPort int,
 
 	s.NewEcShardsChan = make(chan master_pb.VolumeEcShardInformationMessage, 3)
 	s.DeletedEcShardsChan = make(chan master_pb.VolumeEcShardInformationMessage, 3)
-
+	s.ecReadCache = NewEcReadCache()
 	return
 }
 func (s *Store) AddVolume(volumeId needle.VolumeId, collection string, needleMapKind NeedleMapKind, replicaPlacement string, ttlString string, preallocate int64, MemoryMapMaxSizeMb uint32, diskType DiskType, ldbTimeout int64) error {

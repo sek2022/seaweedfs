@@ -11,6 +11,7 @@ import (
 	"github.com/seaweedfs/seaweedfs/weed/stats"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
 	"github.com/seaweedfs/seaweedfs/weed/storage/types"
+	"golang.org/x/sys/unix"
 )
 
 type ShardId uint8
@@ -24,6 +25,7 @@ type EcVolumeShard struct {
 	ecdFileSize        int64
 	DiskType           types.DiskType
 	DataFileAccessLock sync.RWMutex
+	bufferPool         *sync.Pool
 }
 
 func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string, id needle.VolumeId, shardId ShardId) (v *EcVolumeShard, e error) {
@@ -47,7 +49,12 @@ func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string
 	v.ecdFileSize = ecdFi.Size()
 
 	stats.VolumeServerVolumeGauge.WithLabelValues(v.Collection, "ec_shards").Inc()
-
+	v.bufferPool = &sync.Pool{
+		New: func() interface{} {
+			buf := make([]byte, 4096) // 或其他合适的大小
+			return &buf
+		},
+	}
 	return
 }
 
@@ -94,7 +101,24 @@ func (shard *EcVolumeShard) Destroy() {
 }
 
 func (shard *EcVolumeShard) ReadAt(buf []byte, offset int64) (int, error) {
+	// 使用buffer pool
+	tmpBufPtr := shard.bufferPool.Get().(*[]byte)
+	defer shard.bufferPool.Put(tmpBufPtr)
+	tmpBuf := *tmpBufPtr
 
-	return shard.ecdFile.ReadAt(buf, offset)
+	// 计算对齐读取
+	alignedOffset := offset &^ 4095         // 4KB对齐
+	readSize := ((len(buf) + 4095) &^ 4095) // 向上对齐到4KB
+
+	// 使用pread直接读取,避免seek
+	_, err := unix.Pread(int(shard.ecdFile.Fd()), tmpBuf[:readSize], alignedOffset)
+	if err != nil {
+		return 0, err
+	}
+
+	// 复制需要的部分
+	copy(buf, tmpBuf[offset-alignedOffset:])
+	return len(buf), nil
+	//return shard.ecdFile.ReadAt(buf, offset)
 
 }
