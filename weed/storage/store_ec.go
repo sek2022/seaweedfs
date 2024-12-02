@@ -224,9 +224,14 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 		}
 
 		// 写入缓存
-		s.ecReadCache.cache.Set(cacheKey, data, 10*time.Minute)
+		var cache = false
+		if len(data) < 262144 { //cache when data > 256K
+			s.ecReadCache.cache.Set(cacheKey, data, 10*time.Minute)
+			cache = true
+		}
+
 		t3 := time.Now().UnixMilli()
-		glog.V(0).Infof("read local ec shard and add cache %d.%d offset %d, total time: %d, read time: %d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2)
+		glog.V(0).Infof("read local ec shard and add cache %d.%d offset %d, total time: %d, read time: %d, cache:%v, count:%d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2, cache, s.ecReadCache.cache.ItemCount())
 
 	} else {
 		ecVolume.ShardLocationsLock.RLock()
