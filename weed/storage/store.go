@@ -85,8 +85,8 @@ type EcReadCache struct {
 func NewEcReadCache() *EcReadCache {
 	return &EcReadCache{
 		cache: ccache.New(ccache.Configure().
-			MaxSize(2000).     // 缓存2000个块
-			ItemsToPrune(100). // 每次清理500条
+			MaxSize(100).      // 缓存2000个块
+			ItemsToPrune(10).  // 每次清理500条
 			GetsPerPromote(3). // 访问3次后提升
 			Buckets(512)),     // 使用512个bucket
 		pageSize: 256 * 1024, // 256KB per page

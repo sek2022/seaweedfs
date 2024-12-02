@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"github.com/karlseguin/ccache/v2"
 	"io"
 	"os"
 	"sync"
@@ -225,8 +226,15 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 
 		// 写入缓存
 		var cache = false
-		if len(data) < 262144 && s.ecReadCache.cache.ItemCount() < 2000 { //cache when data > 256K
-			s.ecReadCache.cache.Set(cacheKey, data, 10*time.Minute)
+		if s.ecReadCache.cache.ItemCount() >= 100 {
+			// 使用 DeleteFunc 删除最早访问的10条记录
+			s.ecReadCache.cache.DeleteFunc(func(key string, item *ccache.Item) bool {
+				// 返回true表示删除该item
+				return item.Expired()
+			})
+		}
+		if len(data) < 10485760 && s.ecReadCache.cache.ItemCount() < 100 { //cache when data > 10M
+			s.ecReadCache.cache.Set(cacheKey, data, 10*time.Second)
 			cache = true
 		}
 
