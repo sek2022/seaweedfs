@@ -203,15 +203,16 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 	// 构造缓存key
 	cacheKey := fmt.Sprintf("ec:%d:%d:%d", ecVolume.VolumeId, interval.BlockIndex, needleId)
 	shardId, actualOffset := interval.ToShardIdAndOffset(erasure_coding.ErasureCodingLargeBlockSize, erasure_coding.ErasureCodingSmallBlockSize)
-
+	data = make([]byte, interval.Size)
 	// 检查缓存
 	if item := s.ecReadCache.cache.Get(cacheKey); item != nil && !item.Expired() {
 		glog.V(0).Infof("read local ec shard %d.%d offset %d, from cache,key ：%s", ecVolume.VolumeId, shardId, actualOffset, cacheKey)
-
-		return item.Value().([]byte), false, nil
+		cachedData := item.Value().([]byte)
+		// 克隆一份数据
+		copy(data, cachedData)
+		data = item.Value().([]byte)
+		return
 	}
-
-	data = make([]byte, interval.Size)
 	t1 := time.Now().UnixMilli()
 	if shard, found := ecVolume.FindEcVolumeShard(shardId); found {
 		//fmt.Println("-----ok needleId", needleId, ",volume:", ecVolume.VolumeId, ",shardId:", shardId, ",interval:", interval.BlockIndex)
