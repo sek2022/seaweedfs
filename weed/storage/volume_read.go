@@ -2,9 +2,10 @@ package storage
 
 import (
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/util/mem"
 	"io"
 	"time"
+
+	"github.com/seaweedfs/seaweedfs/weed/util/mem"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/stats"
@@ -54,6 +55,23 @@ func (v *Volume) readNeedle(n *needle.Needle, readOption *ReadOption, onReadSize
 			readOption.IsMetaOnly = true
 		}
 	}
+	// 如果只需要读取部分数据
+	if readOption != nil && readOption.ReadPart {
+		actualOffset := nv.Offset.ToActualOffset()
+		if readOption.IsOutOfRange {
+			actualOffset += int64(MaxPossibleVolumeSize)
+		}
+
+		// 创建一个buffer用于存储部分数据
+		buf := make([]byte, readOption.Size)
+		count, err = n.ReadNeedleDataPart(v.DataBackend, actualOffset, buf, readOption.Offset)
+		if err != nil {
+			return 0, fmt.Errorf("read partial data: %v", err)
+		}
+		n.Data = buf
+		return int(readOption.Size), nil
+	}
+
 	if readOption == nil || !readOption.IsMetaOnly {
 		err = n.ReadData(v.DataBackend, nv.Offset.ToActualOffset(), readSize, v.Version())
 		v.checkReadWriteError(err)

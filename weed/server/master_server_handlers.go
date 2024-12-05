@@ -178,7 +178,7 @@ func (ms *MasterServer) findVolumeLocation(collection, fileOrVolumeId string) op
 			}
 		}
 	}
-	fmt.Println("-----fileId:", fileOrVolumeId, " is a ec file,selectedLocs:", selectedLocs)
+	//fmt.Println("-----fileId:", fileOrVolumeId, " is a ec file,selectedLocs:", selectedLocs)
 	ret := operation.LookupResult{
 		VolumeOrFileId: vid,
 		Locations:      selectedLocs,

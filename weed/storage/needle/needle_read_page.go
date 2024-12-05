@@ -2,11 +2,12 @@ package needle
 
 import (
 	"fmt"
+	"io"
+
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/storage/backend"
 	. "github.com/seaweedfs/seaweedfs/weed/storage/types"
 	"github.com/seaweedfs/seaweedfs/weed/util"
-	"io"
 )
 
 // ReadNeedleData uses a needle without n.Data to read the content
@@ -27,6 +28,21 @@ func (n *Needle) ReadNeedleData(r backend.BackendStorageFile, volumeOffset int64
 	}
 	return
 
+}
+
+func (n *Needle) ReadNeedleDataPart(r backend.BackendStorageFile, volumeOffset int64, data []byte, needleOffset int64) (count int, err error) {
+	// 调整读取位置到数据实际开始位置 + 偏移量
+	startOffset := volumeOffset + NeedleHeaderSize + DataSizeSize + needleOffset
+
+	// 读取指定大小的数据
+	count, err = r.ReadAt(data, startOffset)
+	if err != nil {
+		fileSize, _, _ := r.GetStat()
+		glog.Errorf("%s read %d %d size %d at offset %d fileSize %d: %v", r.Name(), n.Id, needleOffset, len(data), volumeOffset, fileSize, err)
+
+		return
+	}
+	return
 }
 
 // ReadNeedleMeta fills all metadata except the n.Data

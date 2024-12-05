@@ -85,6 +85,49 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 	return ranges, nil
 }
 
+func parseRangeHeader(s string) ([]httpRange, error) {
+	if s == "" {
+		return nil, nil // header not present
+	}
+	const b = "bytes="
+	if !strings.HasPrefix(s, b) {
+		return nil, errors.New("invalid range")
+	}
+	var ranges []httpRange
+	for _, ra := range strings.Split(s[len(b):], ",") {
+		ra = strings.TrimSpace(ra)
+		if ra == "" {
+			continue
+		}
+		i := strings.Index(ra, "-")
+		if i < 0 {
+			return nil, errors.New("invalid range")
+		}
+		start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
+		var r httpRange
+		if start == "" {
+			continue
+		} else {
+			is, err := strconv.ParseInt(start, 10, 64)
+			if err != nil || is < 0 {
+				return nil, errors.New("invalid range")
+			}
+			r.start = is
+			if end == "" {
+				continue
+			} else {
+				ie, err := strconv.ParseInt(end, 10, 64)
+				if err != nil || r.start > ie {
+					return nil, errors.New("invalid range")
+				}
+				r.length = ie - r.start + 1
+			}
+		}
+		ranges = append(ranges, r)
+	}
+	return ranges, nil
+}
+
 // countingWriter counts how many bytes have been written to it.
 type countingWriter int64
 

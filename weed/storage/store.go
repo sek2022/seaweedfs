@@ -50,6 +50,11 @@ type ReadOption struct {
 	// increasing ReadBufferSize can reduce the number of get locks times and shorten read P99 latency.
 	// but will increase memory usage a bit. Use with hasSlowRead normally.
 	ReadBufferSize int
+	// 新增字段用于支持部分读取
+	Offset   int64 // 读取的起始位置
+	Size     int64 // 需要读取的数据大小
+	ReadPart bool  // 部分读取
+	Ec       bool
 }
 
 /*
@@ -88,7 +93,7 @@ func NewEcReadCache() *EcReadCache {
 			MaxSize(100).      // 缓存2000个块
 			ItemsToPrune(10).  // 每次清理500条
 			GetsPerPromote(3). // 访问3次后提升
-			Buckets(512)),     // 使用512个bucket
+			Buckets(256)),     // 使用512个bucket
 		pageSize: 256 * 1024, // 256KB per page
 	}
 }
