@@ -125,8 +125,9 @@ func fetchChunkRange(buffer []byte, lookupFileIdFn wdclient.LookupFileIdFunction
 	st02 := time.Now().UnixMilli()
 	n, err := util_http.RetriedFetchChunkData(buffer, urlStrings, cipherKey, isGzipped, false, offset)
 	st03 := time.Now().UnixMilli()
-	glog.V(0).Infof("-----fetchChunkRange chunkFileId:%s, urlStrings:%s, gzip:%v,total timeMilli:%d, lookupFileIdFn milli:%d, offset:%d,size:%v",
-		fileId, urlStrings, isGzipped, st03-st01, st02-st01, offset, n)
+	if st03-st01 > 2000 {
+		glog.V(0).Infof("-----fetchChunkRange chunkFileId:%s, urlStrings:%s, gzip:%v,total timeMilli:%d, lookupFileIdFn milli:%d, offset:%d,size:%v", fileId, urlStrings, isGzipped, st03-st01, st02-st01, offset, n)
+	}
 
 	return n, err
 }

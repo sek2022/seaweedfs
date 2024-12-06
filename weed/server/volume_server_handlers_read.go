@@ -163,15 +163,18 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 		atomic.AddInt64(&vs.inFlightDownloadDataSize, int64(memoryCost))
 	}
 	if hasVolume {
-
 		count, err = vs.store.ReadVolumeNeedle(volumeId, n, readOption, onReadSizeFn)
 	} else if hasEcVolume {
 		readOption.Ec = true
 		count, err = vs.store.ReadEcShardNeedleWithReadOption(volumeId, n, readOption, onReadSizeFn)
 	}
 	if readOption.ReadPart {
-		glog.V(0).Infof("-----hasVolume:%v,hasEcVolume:%v,volumeId:%d, RemoteAddr:%s,path:%s: needle:%v, count:%d, readPart:%v, err:%v, offset-size:%d,%d",
-			hasVolume, hasEcVolume, volumeId, r.RemoteAddr, r.URL.Path, n, count, readOption.ReadPart, err, readOption.Offset, readOption.Size)
+		strErr := ""
+		if err != nil {
+			strErr = fmt.Sprintf("error:%v", err)
+		}
+		glog.V(0).Infof("-----hasVolume:%v,hasEcVolume:%v,volumeId:%d, RemoteAddr:%s,path:%s: needle:%v, count:%d, readPart:%v, err:%s, offset-size:%d,%d",
+			hasVolume, hasEcVolume, volumeId, r.RemoteAddr, r.URL.Path, n, count, readOption.ReadPart, strErr, readOption.Offset, readOption.Size)
 	}
 
 	defer func() {
