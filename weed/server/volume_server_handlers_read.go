@@ -163,6 +163,7 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 		atomic.AddInt64(&vs.inFlightDownloadDataSize, int64(memoryCost))
 	}
 	if hasVolume {
+		readOption.ReadPart = false
 		count, err = vs.store.ReadVolumeNeedle(volumeId, n, readOption, onReadSizeFn)
 	} else if hasEcVolume {
 		readOption.Ec = true
