@@ -227,10 +227,10 @@ func adjustIntervalsForRange(intervals []erasure_coding.Interval, offset, size i
 	if ecVolume.Version == needle.Version3 {
 		totalHeaderSize += needle.NeedleChecksumSize
 	}
-
+	//
+	noRemoveHeaderSize := totalHeaderSize
 	var currentOffset int64 = 0
 	remainingSize := size
-	selectedIndex := 0
 
 	for _, interval := range intervals {
 		intervalSize := int64(interval.Size)
@@ -257,14 +257,20 @@ func adjustIntervalsForRange(intervals []erasure_coding.Interval, offset, size i
 			intervalReadStart = offset - currentOffset
 			intervalReadSize = intervalSize - intervalReadStart
 		}
-		//第一个选取到的interval,需要跳过header读取
-		if selectedIndex == 0 {
-			intervalReadStart = intervalReadStart + totalHeaderSize
+		//interval需要跳过header读取
+		if noRemoveHeaderSize > 0 {
+			intervalReadStart = intervalReadStart + noRemoveHeaderSize
 
 			if intervalReadStart > intervalSize { //越界处理
 				intervalReadStart = intervalSize
 			}
 			intervalReadSize = intervalSize - intervalReadStart
+			if intervalReadSize < noRemoveHeaderSize { //剩余的数据不够header，到下个interval跳过剩余header
+				noRemoveHeaderSize = noRemoveHeaderSize - intervalReadSize
+				glog.V(0).Infof("------remove header need multi interval, noRemoveHeaderSize:%d", noRemoveHeaderSize)
+			} else {
+				noRemoveHeaderSize = 0
+			}
 		}
 
 		// 如果这个区间的数据超出了所需大小
@@ -276,7 +282,6 @@ func adjustIntervalsForRange(intervals []erasure_coding.Interval, offset, size i
 			newInterval.InnerBlockOffset += intervalReadStart
 			newInterval.Size = types.Size(intervalReadSize)
 			adjusted = append(adjusted, newInterval)
-			selectedIndex++
 		}
 
 		currentOffset += intervalSize
