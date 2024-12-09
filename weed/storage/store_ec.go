@@ -230,8 +230,9 @@ func adjustIntervalsForRange(intervals []erasure_coding.Interval, offset, size i
 
 	var currentOffset int64 = 0
 	remainingSize := size
+	selectedIndex := 0
 
-	for i, interval := range intervals {
+	for _, interval := range intervals {
 		intervalSize := int64(interval.Size)
 
 		// 跳过目标范围之前的区间
@@ -256,8 +257,8 @@ func adjustIntervalsForRange(intervals []erasure_coding.Interval, offset, size i
 			intervalReadStart = offset - currentOffset
 			intervalReadSize = intervalSize - intervalReadStart
 		}
-		//第一个interval,需要跳过header读取
-		if i == 0 {
+		//第一个选取到的interval,需要跳过header读取
+		if selectedIndex == 0 {
 			intervalReadStart = intervalReadStart + totalHeaderSize
 
 			if intervalReadStart > intervalSize { //越界处理
@@ -275,6 +276,7 @@ func adjustIntervalsForRange(intervals []erasure_coding.Interval, offset, size i
 			newInterval.InnerBlockOffset += intervalReadStart
 			newInterval.Size = types.Size(intervalReadSize)
 			adjusted = append(adjusted, newInterval)
+			selectedIndex++
 		}
 
 		currentOffset += intervalSize
@@ -290,11 +292,11 @@ func (s *Store) readEcShardIntervals(vid needle.VolumeId, needleId types.NeedleI
 		return nil, false, fmt.Errorf("failed to locate shard via master grpc %s: %v", s.MasterAddress, err)
 	}
 
-	//totalHeaderSize := int64(0)
-	//totalHeaderSize += types.NeedleHeaderSize
-	//if ecVolume.Version == needle.Version3 {
-	//	totalHeaderSize += needle.NeedleChecksumSize
-	//}
+	totalHeaderSize := int64(0)
+	totalHeaderSize += types.NeedleHeaderSize
+	if ecVolume.Version == needle.Version3 {
+		totalHeaderSize += needle.NeedleChecksumSize
+	}
 
 	for i, interval := range intervals {
 		//if readOption.ReadPart { //部分读取，去除头部信息
