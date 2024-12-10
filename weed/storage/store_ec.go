@@ -205,6 +205,8 @@ func (s *Store) ReadEcShardNeedleWithReadOption(vid needle.VolumeId, n *needle.N
 				n.Data = bytes
 				n.DataSize = uint32(size)
 				n.Size = size
+
+				glog.V(3).Infof("bytes:%v", bytes)
 			} else {
 				err = n.ReadBytes(bytes, offset.ToActualOffset(), size, localEcVolume.Version)
 			}

@@ -265,7 +265,7 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
-
+	glog.V(0).Infof("-----isMetaOnly:%v", readOption.IsMetaOnly)
 	if !readOption.IsMetaOnly {
 		rs := conditionallyCropImages(bytes.NewReader(n.Data), ext, r)
 		rs = conditionallyResizeImages(rs, ext, r)
