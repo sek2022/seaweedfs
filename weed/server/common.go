@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/storage"
 	"io"
 	"io/fs"
 	"mime/multipart"
@@ -17,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/seaweedfs/seaweedfs/weed/storage"
 
 	"github.com/seaweedfs/seaweedfs/weed/filer"
 	"github.com/seaweedfs/seaweedfs/weed/s3api/s3_constants"
@@ -365,6 +366,8 @@ func ProcessRangeRequest(r *http.Request, w http.ResponseWriter, totalSize int64
 		if ecReadPart {
 			ra.start = 0
 		}
+		glog.V(0).Infof("------ra.start: %d, ra.length: %d, rangeReq: %s", ra.start, ra.length, rangeReq)
+
 		writeFn, err := prepareWriteFn(ra.start, ra.length)
 		if err != nil {
 			glog.Errorf("ProcessRangeRequest range[0]: %+v err: %v", w.Header(), err)
