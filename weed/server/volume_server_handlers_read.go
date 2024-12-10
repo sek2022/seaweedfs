@@ -166,7 +166,7 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 		readOption.ReadPart = false
 		count, err = vs.store.ReadVolumeNeedle(volumeId, n, readOption, onReadSizeFn)
 	} else if hasEcVolume {
-		readOption.ReadPart = false
+		//readOption.ReadPart = false
 		readOption.Ec = true
 		count, err = vs.store.ReadEcShardNeedleWithReadOption(volumeId, n, readOption, onReadSizeFn)
 	}
