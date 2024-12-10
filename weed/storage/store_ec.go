@@ -350,7 +350,7 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 		}
 		t3 := time.Now().UnixMilli()
 		glog.V(0).Infof("read local ec shard and add cache %d.%d offset %d, total time: %d, read time: %d, data:%d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2, len(data))
-
+		glog.V(0).Infof("before data:%v", data[readOption.Offset:readOption.Offset+60])
 	} else {
 		ecVolume.ShardLocationsLock.RLock()
 		sourceDataNodes, hasShardIdLocation := ecVolume.ShardLocations[shardId]
