@@ -177,6 +177,8 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 	}
 	glog.V(0).Infof("-----hasVolume:%v,hasEcVolume:%v,volumeId:%d, RemoteAddr:%s,path:%s: needle:%v, count:%d, readPart:%v, err:%s, offset-size:%d,%d",
 		hasVolume, hasEcVolume, volumeId, r.RemoteAddr, r.URL.Path, n, count, readOption.ReadPart, strErr, readOption.Offset, readOption.Size)
+
+	glog.V(0).Infof("1before data:%v", n.Data[readOption.Offset:readOption.Offset+60])
 	//}
 
 	defer func() {
@@ -269,6 +271,7 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 	glog.V(0).Infof("-----isMetaOnly:%v", readOption.IsMetaOnly)
 	if !readOption.IsMetaOnly {
 		rs := conditionallyCropImages(bytes.NewReader(n.Data), ext, r)
+
 		rs = conditionallyResizeImages(rs, ext, r)
 		if e := writeResponseContent(filename, mtype, rs, w, r, readOption); e != nil {
 			glog.V(2).Infoln("response write error:", e)
@@ -368,6 +371,7 @@ func conditionallyCropImages(originalDataReaderSeeker io.ReadSeeker, ext string,
 		ext = strings.ToLower(ext)
 	}
 	x1, y1, x2, y2, shouldCrop := shouldCropImages(ext, r)
+	glog.Infof("conditionallyCropImages:%v", shouldCrop)
 	if shouldCrop {
 		var err error
 		rs, err = images.Cropped(ext, rs, x1, y1, x2, y2)
@@ -421,6 +425,10 @@ func writeResponseContent(filename, mimeType string, rs io.ReadSeeker, w http.Re
 			if _, e = rs.Seek(offset, 0); e != nil {
 				return e
 			}
+			var b1s = make([]byte, 50)
+			rs.Read(b1s)
+			glog.V(0).Infof("1before data:%v, offset:size %d:%d", b1s, offset, size)
+
 			_, e = io.CopyN(writer, rs, size)
 			return e
 		}, nil
