@@ -425,9 +425,9 @@ func writeResponseContent(filename, mimeType string, rs io.ReadSeeker, w http.Re
 			if _, e = rs.Seek(offset, 0); e != nil {
 				return e
 			}
-			var b1s = make([]byte, 50)
-			rs.Read(b1s)
-			glog.V(0).Infof("1before data:%v, offset:size %d:%d", b1s, offset, size)
+			//var b1s = make([]byte, 50)
+			//rs.Read(b1s)
+			//glog.V(0).Infof("1before data:%v, offset:size %d:%d", b1s, offset, size)
 
 			_, e = io.CopyN(writer, rs, size)
 			return e
