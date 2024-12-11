@@ -7,6 +7,7 @@ import (
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/pb/filer_pb"
 	"io"
+	"time"
 )
 
 func (fh *FileHandle) lockForRead(startOffset int64, size int) {
@@ -28,7 +29,7 @@ func (fh *FileHandle) readFromChunks(buff []byte, offset int64) (int64, int64, e
 	fileFullPath := fh.FullPath()
 
 	entry := fh.GetEntry()
-	glog.V(0).Infof("-----file handle read %s, remote:%v,fileSize:%d, %d, bufflen:%d", fileFullPath, entry.IsInRemoteOnly(), entry.Attributes.FileSize, offset, len(buff))
+	glog.V(3).Infof("-----file handle read %s, remote:%v,fileSize:%d, %d, bufflen:%d", fileFullPath, entry.IsInRemoteOnly(), entry.Attributes.FileSize, offset, len(buff))
 
 	if entry.IsInRemoteOnly() {
 		glog.V(4).Infof("download remote entry %s", fileFullPath)
@@ -59,13 +60,13 @@ func (fh *FileHandle) readFromChunks(buff []byte, offset int64) (int64, int64, e
 		glog.V(4).Infof("file handle read cached %s [%d,%d] %d", fileFullPath, offset, offset+int64(totalRead), totalRead)
 		return int64(totalRead), 0, nil
 	}
-	//t1 := time.Now().UnixMilli()
+	t1 := time.Now().UnixMilli()
 	totalRead, ts, err := fh.entryChunkGroup.ReadDataAt(fileSize, buff, offset)
-	//t2 := time.Now().UnixMilli()
+	t2 := time.Now().UnixMilli()
 	if err != nil && err != io.EOF {
 		glog.Errorf("file handle read err %s: %v", fileFullPath, err)
 	}
-	//glog.V(0).Infof("-----file handle read %s,fileSize:%d, [%d,%d] %d, bufflen:%d : %v, times:%d", fileFullPath, fileSize, offset, offset+int64(totalRead), totalRead, len(buff), err, t2-t1)
+	glog.V(3).Infof("-----file handle read %s,fileSize:%d, [%d,%d] %d, bufflen:%d : %v, times:%d", fileFullPath, fileSize, offset, offset+int64(totalRead), totalRead, len(buff), err, t2-t1)
 
 	return int64(totalRead), ts, err
 }
