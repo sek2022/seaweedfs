@@ -366,7 +366,7 @@ func ProcessRangeRequest(r *http.Request, w http.ResponseWriter, totalSize int64
 		if ecReadPart {
 			ra.start = 0
 		}
-		glog.V(0).Infof("------ra.start: %d, ra.length: %d, rangeReq: %s, totalSize:%d", ra.start, ra.length, rangeReq, totalSize)
+		//glog.V(0).Infof("------ra.start: %d, ra.length: %d, rangeReq: %s, totalSize:%d", ra.start, ra.length, rangeReq, totalSize)
 
 		writeFn, err := prepareWriteFn(ra.start, ra.length)
 		if err != nil {

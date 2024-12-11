@@ -130,6 +130,7 @@ func (n *Needle) readNeedleDataVersion2(bytes []byte) (err error) {
 	_, err = n.readNeedleDataVersion2NonData(bytes[index:])
 	return
 }
+
 func (n *Needle) readNeedleDataVersion2NonData(bytes []byte) (index int, err error) {
 	lenBytes := len(bytes)
 	if index < lenBytes {
@@ -188,6 +189,10 @@ func (n *Needle) readNeedleDataVersion2NonData(bytes []byte) (index int, err err
 		index = end
 	}
 	return index, nil
+}
+
+func (n *Needle) ReadNeedleDataVersion2NonData(bytes []byte) (index int, err error) {
+	return n.readNeedleDataVersion2NonData(bytes)
 }
 
 func ReadNeedleHeader(r backend.BackendStorageFile, version Version, offset int64) (n *Needle, bytes []byte, bodyLength int64, err error) {

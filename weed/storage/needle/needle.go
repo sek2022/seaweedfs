@@ -42,6 +42,9 @@ type Needle struct {
 	Checksum   CRC    `comment:"CRC32 to check integrity"`
 	AppendAtNs uint64 `comment:"append timestamp in nano seconds"` //version3
 	Padding    []byte `comment:"Aligned to 8 bytes"`
+
+	Header []byte //range read header
+	Tail   []byte //range read tail
 }
 
 func (n *Needle) String() (str string) {

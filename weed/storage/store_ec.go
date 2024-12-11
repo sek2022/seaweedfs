@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"github.com/seaweedfs/seaweedfs/weed/util"
 	"io"
 	"os"
 	"sync"
@@ -159,8 +160,50 @@ func (s *Store) ReadEcShardNeedleWithReadOption(vid needle.VolumeId, n *needle.N
 			if readOption != nil {
 				readPart = readOption.ReadPart
 			}
-			adjustedIntervals := intervals
+			totalHeaderSize := int64(0)
+			totalHeaderSize += types.NeedleHeaderSize
+			if localEcVolume.Version == needle.Version3 || localEcVolume.Version == needle.Version2 {
+				totalHeaderSize += types.DataSizeSize
+			}
+
+			if err = s.cachedLookupEcShardLocations(localEcVolume); err != nil {
+				return 0, fmt.Errorf("failed to locate shard via master grpc %s: %v", s.MasterAddress, err)
+			}
+
 			if readPart {
+				//read header
+				headIntervals := adjustIntervalsHeadAndTailForRange(intervals, 0, totalHeaderSize)
+				if d, _, e := s.readOneEcShardInterval(n.Id, localEcVolume, headIntervals[0]); e != nil {
+					return 0, fmt.Errorf("range read header error:%v", e)
+				} else {
+					n.Header = d
+					n.ParseNeedleHeader(n.Header)
+					n.DataSize = util.BytesToUint32(n.Header[types.NeedleHeaderSize : types.NeedleHeaderSize+4])
+				}
+
+				tailOffset := totalHeaderSize + int64(n.DataSize)
+				tailSize := int64(n.Size) + types.NeedleHeaderSize - tailOffset
+				tailIntervals := adjustIntervalsHeadAndTailForRange(intervals, tailOffset, tailSize)
+				if d, _, e := s.readOneEcShardInterval(n.Id, localEcVolume, tailIntervals[0]); e != nil {
+					return 0, fmt.Errorf("range read tail error:%v", e)
+				} else {
+					n.Tail = d
+					switch localEcVolume.Version {
+					case needle.Version2, needle.Version3:
+						_, err = n.ReadNeedleDataVersion2NonData(n.Tail)
+					}
+					if err != nil && err != io.EOF {
+						return 0, fmt.Errorf("range read tail error:%v", err)
+					}
+				}
+				if n.IsCompressed() { //压缩的数据不支持部分读取
+					readPart = false
+					readOption.ReadPart = false
+					glog.V(0).Infof("vid:nid %d, needle:%v ... is compressed data, don't support range read", vid, n)
+				}
+			}
+			adjustedIntervals := intervals
+			if readPart && readOption != nil {
 				// 计算实际需要读取的范围
 				readStart := int64(0)
 				readSize := int64(size)
@@ -190,9 +233,9 @@ func (s *Store) ReadEcShardNeedleWithReadOption(vid needle.VolumeId, n *needle.N
 				glog.V(3).Infof("ReadEcShardNeedle needle id %s intervals:%+v", n.String(), adjustedIntervals)
 			}
 
-			bytes, isDeleted, err := s.readEcShardIntervals(vid, n.Id, localEcVolume, adjustedIntervals, readOption)
+			bytes, isDeleted, err := s.readEcShardIntervals(vid, n, localEcVolume, adjustedIntervals)
 
-			glog.V(3).Infof("read ec volume %d offset %d size %d intervals:%+v adjustedIntervals:%+v", vid, offset.ToActualOffset(), size, intervals, adjustedIntervals)
+			//glog.V(3).Infof("read ec volume %d offset %d size %d intervals:%+v adjustedIntervals:%+v", vid, offset.ToActualOffset(), size, intervals, adjustedIntervals)
 			if err != nil {
 				return 0, fmt.Errorf("ReadEcShardIntervals: %v", err)
 			}
@@ -203,10 +246,9 @@ func (s *Store) ReadEcShardNeedleWithReadOption(vid needle.VolumeId, n *needle.N
 			if readPart {
 				// 直接设置needle的数据，因为我们已经读取了正确的部分
 				n.Data = bytes
-				n.DataSize = uint32(size)
-				n.Size = size
-
-				glog.V(3).Infof("bytes:%v", bytes)
+				//n.DataSize = uint32(size)
+				//n.Size = size
+				//glog.V(3).Infof("bytes:%v", bytes)
 			} else {
 				err = n.ReadBytes(bytes, offset.ToActualOffset(), size, localEcVolume.Version)
 			}
@@ -293,32 +335,64 @@ func adjustIntervalsForRange(intervals []erasure_coding.Interval, offset, size i
 	return adjusted
 }
 
-func (s *Store) readEcShardIntervals(vid needle.VolumeId, needleId types.NeedleId, ecVolume *erasure_coding.EcVolume, intervals []erasure_coding.Interval, readOption *ReadOption) (data []byte, is_deleted bool, err error) {
+func adjustIntervalsHeadAndTailForRange(intervals []erasure_coding.Interval, offset, size int64) []erasure_coding.Interval {
+	var adjusted []erasure_coding.Interval
 
-	if err = s.cachedLookupEcShardLocations(ecVolume); err != nil {
-		return nil, false, fmt.Errorf("failed to locate shard via master grpc %s: %v", s.MasterAddress, err)
+	var currentOffset int64 = 0
+	remainingSize := size
+
+	for _, interval := range intervals {
+		intervalSize := int64(interval.Size)
+
+		// 跳过目标范围之前的区间
+		if currentOffset+intervalSize <= offset {
+			currentOffset += intervalSize
+			continue
+		}
+
+		// 如果已经读取完所需大小，退出
+		if remainingSize <= 0 {
+			break
+		}
+
+		newInterval := interval
+
+		// 计算这个区间内实际要读取的数据
+		var intervalReadStart int64 = 0
+		var intervalReadSize = intervalSize
+
+		// 如果这个区间包含起始偏移量
+		if currentOffset < offset {
+			intervalReadStart = offset - currentOffset
+			intervalReadSize = intervalSize - intervalReadStart
+		}
+
+		// 如果这个区间的数据超出了所需大小
+		if remainingSize < intervalReadSize {
+			intervalReadSize = remainingSize
+		}
+
+		if intervalReadSize > 0 {
+			newInterval.InnerBlockOffset += intervalReadStart
+			newInterval.Size = types.Size(intervalReadSize)
+			adjusted = append(adjusted, newInterval)
+		}
+
+		currentOffset += intervalSize
+		remainingSize -= intervalReadSize
 	}
 
-	//totalHeaderSize := int64(0)
-	//totalHeaderSize += types.NeedleHeaderSize
-	//if ecVolume.Version == needle.Version3 {
-	//	totalHeaderSize += needle.NeedleChecksumSize
+	return adjusted
+}
+
+func (s *Store) readEcShardIntervals(vid needle.VolumeId, n *needle.Needle, ecVolume *erasure_coding.EcVolume, adjustedIntervals []erasure_coding.Interval) (data []byte, is_deleted bool, err error) {
+
+	//if err = s.cachedLookupEcShardLocations(ecVolume); err != nil {
+	//	return nil, false, fmt.Errorf("failed to locate shard via master grpc %s: %v", s.MasterAddress, err)
 	//}
 
-	for i, interval := range intervals {
-		//if readOption.ReadPart { //部分读取，去除头部信息
-		//	if i == 0 {
-		//		//跳过头信息
-		//		interval.InnerBlockOffset += totalHeaderSize
-		//		//第一个少读取totalHeaderSize 字节
-		//		interval.Size = interval.Size - types.Size(totalHeaderSize)
-		//	}
-		//
-		//	if i == len(intervals)-1 { //最后一个需要加回headerSize个字节
-		//		interval.Size = interval.Size + types.Size(totalHeaderSize)
-		//	}
-		//}
-		if d, isDeleted, e := s.readOneEcShardInterval(needleId, ecVolume, interval, readOption); e != nil {
+	for i, interval := range adjustedIntervals {
+		if d, isDeleted, e := s.readOneEcShardInterval(n.Id, ecVolume, interval); e != nil {
 			return nil, isDeleted, e
 		} else {
 			if isDeleted {
@@ -334,27 +408,22 @@ func (s *Store) readEcShardIntervals(vid needle.VolumeId, needleId types.NeedleI
 	return
 }
 
-func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasure_coding.EcVolume, interval erasure_coding.Interval, readOption *ReadOption) (data []byte, is_deleted bool, err error) {
+func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasure_coding.EcVolume, interval erasure_coding.Interval) (data []byte, is_deleted bool, err error) {
 	shardId, actualOffset := interval.ToShardIdAndOffset(erasure_coding.ErasureCodingLargeBlockSize, erasure_coding.ErasureCodingSmallBlockSize)
 
 	data = make([]byte, interval.Size)
 
-	t1 := time.Now().UnixMilli()
+	//t1 := time.Now().UnixMilli()
 	if shard, found := ecVolume.FindEcVolumeShard(shardId); found {
 		shard.DataFileAccessLock.RLock()
 		defer shard.DataFileAccessLock.RUnlock()
-		t2 := time.Now().UnixMilli()
+		//t2 := time.Now().UnixMilli()
 		if _, err = shard.ReadAt(data, actualOffset); err != nil {
 			glog.V(0).Infof("read local ec shard %d.%d offset %d: %v", ecVolume.VolumeId, shardId, actualOffset, err)
 			return
 		}
-		t3 := time.Now().UnixMilli()
-		glog.V(0).Infof("read local ec shard and add cache %d.%d offset %d, total time: %d, read time: %d, data:%d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2, len(data))
-		if !readOption.ReadPart {
-			glog.V(0).Infof("1before data:%v", data[readOption.Offset:readOption.Offset+60])
-		} else {
-			glog.V(0).Infof("1before data:%v", data[0:60])
-		}
+		//t3 := time.Now().UnixMilli()
+		//glog.V(0).Infof("read local ec shard and add cache %d.%d offset %d, total time: %d, read time: %d, data:%d", ecVolume.VolumeId, shardId, actualOffset, t3-t1, t3-t2, len(data))
 	} else {
 		ecVolume.ShardLocationsLock.RLock()
 		sourceDataNodes, hasShardIdLocation := ecVolume.ShardLocations[shardId]
@@ -364,8 +433,8 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 		if hasShardIdLocation {
 			//fmt.Println("-----not found needleId", needleId, ",volume:", ecVolume.VolumeId, ",shardId:", shardId, ",interval:", interval.BlockIndex, ",sourceDataNodes:", sourceDataNodes)
 			_, is_deleted, err = s.readRemoteEcShardInterval(sourceDataNodes, needleId, ecVolume.VolumeId, shardId, data, actualOffset)
-			t2 := time.Now().UnixMilli()
-			glog.V(0).Infof("read Remote ec shard %d.%d offset %d, time: %d, size:%d", ecVolume.VolumeId, shardId, actualOffset, t2-t1, interval.Size)
+			//t2 := time.Now().UnixMilli()
+			//glog.V(0).Infof("read Remote ec shard %d.%d offset %d, time: %d, size:%d", ecVolume.VolumeId, shardId, actualOffset, t2-t1, interval.Size)
 
 			if err == nil {
 				return
