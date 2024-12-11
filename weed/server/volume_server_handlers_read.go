@@ -175,7 +175,7 @@ func (vs *VolumeServer) GetOrHeadHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		strErr = fmt.Sprintf("error:%v", err)
 	}
-	glog.V(0).Infof("-----hasVolume:%v,hasEcVolume:%v,volumeId:%d, RemoteAddr:%s,path:%s: needle:%v, count:%d, readPart:%v, err:%s, offset-size:%d,%d",
+	glog.V(3).Infof("-----hasVolume:%v,hasEcVolume:%v,volumeId:%d, RemoteAddr:%s,path:%s: needle:%v, count:%d, readPart:%v, err:%s, offset-size:%d,%d",
 		hasVolume, hasEcVolume, volumeId, r.RemoteAddr, r.URL.Path, n, count, readOption.ReadPart, strErr, readOption.Offset, readOption.Size)
 
 	defer func() {
