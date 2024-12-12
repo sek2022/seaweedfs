@@ -6,11 +6,11 @@ import (
 	"github.com/seaweedfs/seaweedfs/weed/util"
 	"io"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/seaweedfs/seaweedfs/weed/pb"
-	"golang.org/x/exp/slices"
 
 	"github.com/klauspost/reedsolomon"
 
@@ -417,6 +417,7 @@ func (s *Store) readOneEcShardInterval(needleId types.NeedleId, ecVolume *erasur
 	if shard, found := ecVolume.FindEcVolumeShard(shardId); found {
 		shard.DataFileAccessLock.RLock()
 		defer shard.DataFileAccessLock.RUnlock()
+
 		//t2 := time.Now().UnixMilli()
 		if _, err = shard.ReadAt(data, actualOffset); err != nil {
 			glog.V(0).Infof("read local ec shard %d.%d offset %d: %v", ecVolume.VolumeId, shardId, actualOffset, err)
@@ -625,7 +626,7 @@ func (s *Store) EcVolumes() (ecVolumes []*erasure_coding.EcVolume) {
 		location.ecVolumesLock.RUnlock()
 	}
 	slices.SortFunc(ecVolumes, func(a, b *erasure_coding.EcVolume) int {
-		return int(b.VolumeId - a.VolumeId)
+		return int(a.VolumeId) - int(b.VolumeId)
 	})
 	return ecVolumes
 }

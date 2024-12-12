@@ -2,6 +2,7 @@ package erasure_coding
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"strconv"
@@ -93,34 +94,11 @@ func (shard *EcVolumeShard) Destroy() {
 }
 
 func (shard *EcVolumeShard) ReadAt(buf []byte, offset int64) (int, error) {
-	// 计算对齐读取
-	//alignedOffset := offset &^ 4095       // 4KB对齐
-	//readSize := (len(buf) + 4095) &^ 4095 // 向上对齐到4KB
-	//
-	//// 直接分配所需大小的临时缓冲区
-	//tmpBuf := make([]byte, readSize)
-	//
-	//// 使用pread直接读取
-	//n, err := unix.Pread(int(shard.ecdFile.Fd()), tmpBuf, alignedOffset)
-	//if err != nil {
-	//	return 0, fmt.Errorf("pread error: %v", err)
-	//}
-	//if n < len(buf) {
-	//	return 0, fmt.Errorf("short read: got %d bytes, want %d bytes", n, len(buf))
-	//}
-	//
-	//// 计算实际需要复制的长度
-	//copyLen := len(buf)
-	//if offset-alignedOffset+int64(copyLen) > int64(n) {
-	//	copyLen = int(int64(n) - (offset - alignedOffset))
-	//}
-	//
-	//// 安全复制
-	//if copyLen <= 0 {
-	//	return 0, fmt.Errorf("invalid copy length: %d", copyLen)
-	//}
-	//copy(buf[:copyLen], tmpBuf[offset-alignedOffset:offset-alignedOffset+int64(copyLen)])
-	//
-	//return copyLen, nil
-	return shard.ecdFile.ReadAt(buf, offset)
+
+	n, err := shard.ecdFile.ReadAt(buf, offset)
+	if err == io.EOF && n == len(buf) {
+		err = nil
+	}
+	return n, err
+
 }
