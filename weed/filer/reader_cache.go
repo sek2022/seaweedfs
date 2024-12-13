@@ -168,19 +168,18 @@ func (s *SingleChunkCacher) startCaching() {
 	defer s.Unlock()
 
 	s.cacheStartedCh <- struct{}{} // means this has been started
-	st01 := time.Now().UnixMilli()
+	//st01 := time.Now().UnixMilli()
 	urlStrings, err := s.parent.lookupFileIdFn(s.chunkFileId)
 	if err != nil {
 		s.err = fmt.Errorf("operation LookupFileId %s failed, err: %v", s.chunkFileId, err)
 		return
 	}
-	st02 := time.Now().UnixMilli()
+	//st02 := time.Now().UnixMilli()
 	s.data = mem.Allocate(s.chunkSize)
 
 	_, s.err = util_http.RetriedFetchChunkData(s.data, urlStrings, s.cipherKey, s.isGzipped, true, 0)
-	st03 := time.Now().UnixMilli()
-	glog.V(0).Infof("-----chunkFileId:%s, urlStrings:%s, gzip:%v,total timeMilli:%d, lookupFileIdFn milli:%d, chukSize:%d,shouldCache:%v",
-		s.chunkFileId, urlStrings, s.isGzipped, st03-st01, st02-st01, s.chunkSize, s.shouldCache)
+	//st03 := time.Now().UnixMilli()
+	//glog.V(0).Infof("-----chunkFileId:%s, urlStrings:%s, gzip:%v,total timeMilli:%d, lookupFileIdFn milli:%d, chukSize:%d,shouldCache:%v", s.chunkFileId, urlStrings, s.isGzipped, st03-st01, st02-st01, s.chunkSize, s.shouldCache)
 
 	if s.err != nil {
 		mem.Free(s.data)
