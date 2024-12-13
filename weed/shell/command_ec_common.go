@@ -299,7 +299,7 @@ func oneServerMountEcShards(grpcDialOption grpc.DialOption, targetServer *EcNode
 	return
 }
 
-func eachDataNode(topo *master_pb.TopologyInfo, fn func(dc string, rack RackId, dn *master_pb.DataNodeInfo)) {
+// func eachDataNode(topo *master_pb.TopologyInfo, fn func(dc string, rack RackId, dn *master_pb.DataNodeInfo)) {
 func eachDataNode(topo *master_pb.TopologyInfo, fn func(dc DataCenterId, rack RackId, dn *master_pb.DataNodeInfo)) {
 	for _, dc := range topo.DataCenterInfos {
 		for _, rack := range dc.RackInfos {
@@ -329,10 +329,10 @@ func sortVolumeIdsAscending(volumeIds []needle.VolumeId) {
 	})
 }
 
-type CandidateEcNode struct {
-	ecNode     *EcNode
-	shardCount int
-}
+//type CandidateEcNode struct {
+//	ecNode     *EcNode
+//	shardCount int
+//}
 
 // if the index node changed the freeEcSlot, need to keep every EcNode still sorted
 func ensureSortedEcNodes(data []*CandidateEcNode, index int, lessThan func(i, j int) bool) {
@@ -377,15 +377,15 @@ func countFreeShardSlots(dn *master_pb.DataNodeInfo, diskType types.DiskType) (c
 	return int(diskInfo.MaxVolumeCount-diskInfo.VolumeCount)*erasure_coding.DataShardsCount - countShards(diskInfo.EcShardInfos)
 }
 
-type RackId string
-type EcNodeId string
-
-type EcNode struct {
-	info       *master_pb.DataNodeInfo
-	dc         string
-	rack       RackId
-	freeEcSlot int
-}
+//type RackId string
+//type EcNodeId string
+//
+//type EcNode struct {
+//	info       *master_pb.DataNodeInfo
+//	dc         string
+//	rack       RackId
+//	freeEcSlot int
+//}
 
 func (ecNode *EcNode) String() string {
 	return fmt.Sprintf("dc:%s, rack:%s, freeEcSlot:%d, info id:%+v", ecNode.dc, ecNode.rack, ecNode.freeEcSlot, ecNode.info.Id)

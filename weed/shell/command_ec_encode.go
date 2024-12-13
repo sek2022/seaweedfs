@@ -87,7 +87,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 
 	if !*forceChanges {
 		var nodeCount int
-		eachDataNode(topologyInfo, func(dc string, rack RackId, dn *master_pb.DataNodeInfo) {
+		eachDataNode(topologyInfo, func(dc DataCenterId, rack RackId, dn *master_pb.DataNodeInfo) {
 			nodeCount++
 		})
 		if nodeCount < erasure_coding.ParityShardsCount {
@@ -327,8 +327,7 @@ func doEcEncode(commandEnv *CommandEnv, collection string, vid needle.VolumeId, 
 func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, collection string, sourceVolumeServer pb.ServerAddress) error {
 
 	fmt.Printf("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
-
-	allEcNodes, totalFreeEcSlots, err := collectEcNodes(commandEnv, "")
+	allEcNodes, totalFreeEcSlots, err := collectEcNodes(commandEnv)
 	if err != nil {
 		return err
 	}
@@ -336,8 +335,14 @@ func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, 
 	if totalFreeEcSlots < erasure_coding.TotalShardsCount {
 		return fmt.Errorf("not enough free ec shard slots. only %d left", totalFreeEcSlots)
 	}
+
+	ecb := &ecBalancer{
+		commandEnv: commandEnv,
+		ecNodes:    allEcNodes,
+	}
+
 	//Ensure EcNodes come from different rack, Prevent uneven distribution
-	allocatedDataNodes := getEcNodesMustDifferentRacks(allEcNodes)
+	allocatedDataNodes := getEcNodesMustDifferentRacks(allEcNodes, ecb)
 	if len(allocatedDataNodes) > erasure_coding.TotalShardsCount {
 		allocatedDataNodes = allocatedDataNodes[:erasure_coding.TotalShardsCount]
 	}
@@ -390,8 +395,8 @@ func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, 
 
 }
 
-func getEcNodesMustDifferentRacks(allEcNodes []*EcNode) []*EcNode {
-	racks := collectRacks(allEcNodes)
+func getEcNodesMustDifferentRacks(allEcNodes []*EcNode, ecb *ecBalancer) []*EcNode {
+	racks := ecb.racks()
 	// calculate average number of shards an ec rack should have for one volume
 	averageShardsPerEcRack := ceilDivide(erasure_coding.TotalShardsCount, len(racks))
 	var rackEcNodes = make(map[string][]*EcNode)
@@ -588,7 +593,8 @@ func collectVolumeIdsForEcEncode(commandEnv *CommandEnv, selectedCollection stri
 	fmt.Printf("collect volumes quiet for: %d seconds and %.1f%% full\n", quietSeconds, fullPercentage)
 
 	vidMap := make(map[uint32]bool)
-	eachDataNode(topologyInfo, func(dc string, rack RackId, dn *master_pb.DataNodeInfo) {
+	eachDataNode(topologyInfo, func(dc DataCenterId, rack RackId, dn *master_pb.DataNodeInfo) {
+		//eachDataNode(topologyInfo, func(dc string, rack RackId, dn *master_pb.DataNodeInfo) {
 		for _, diskInfo := range dn.DiskInfos {
 			for _, v := range diskInfo.VolumeInfos {
 				// ignore remote volumes

@@ -378,6 +378,34 @@ func (vl *VolumeLayout) ShouldGrowVolumesByDcAndRack(writables *[]needle.VolumeI
 	return true
 }
 
+func (vl *VolumeLayout) ShouldGrowVolumesByDataNode(nodeType string, dataNode string) bool {
+	vl.accessLock.RLock()
+	writables := make([]needle.VolumeId, len(vl.writables))
+	copy(writables, vl.writables)
+	vl.accessLock.RUnlock()
+
+	dataNodeId := NodeId(dataNode)
+	for _, v := range writables {
+		for _, dn := range vl.vid2location[v].list {
+			dataNodeFound := false
+			switch nodeType {
+			case "DataCenter":
+				dataNodeFound = dn.GetDataCenter().Id() == dataNodeId
+			case "Rack":
+				dataNodeFound = dn.GetRack().Id() == dataNodeId
+			case "DataNode":
+				dataNodeFound = dn.Id() == dataNodeId
+			}
+			if dataNodeFound {
+				if info, err := dn.GetVolumesById(v); err == nil && !vl.isCrowdedVolume(&info) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 func (vl *VolumeLayout) GetWritableVolumeCount() (active, crowded int) {
 	vl.accessLock.RLock()
 	defer vl.accessLock.RUnlock()
