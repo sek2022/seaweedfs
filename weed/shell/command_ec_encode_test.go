@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestEcDistribution(t *testing.T) {
+func TestEcDistribution3(t *testing.T) {
 
 	topologyInfo := parseOutput(topoData)
 

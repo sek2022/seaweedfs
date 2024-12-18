@@ -3,12 +3,14 @@ package weed_server
 import (
 	"context"
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/pb"
-	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/seaweedfs/seaweedfs/weed/pb"
+	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 
@@ -82,6 +84,7 @@ func (ms *MasterServer) findVolumeLocation(collection, fileOrVolumeId string) op
 	var locations []operation.Location
 	var err error
 	var isEc bool
+	var isEcBusy bool
 	isFile := false
 	vid := fileOrVolumeId
 	commaSep := strings.Index(fileOrVolumeId, ",")
@@ -92,16 +95,21 @@ func (ms *MasterServer) findVolumeLocation(collection, fileOrVolumeId string) op
 	if ms.Topo.IsLeader() {
 		volumeId, newVolumeIdErr := needle.NewVolumeId(vid)
 		if newVolumeIdErr != nil {
-			err = fmt.Errorf("Unknown volume id %s", vid)
+			err = fmt.Errorf("unknown volume id %s", vid)
 		} else {
 			machines, ec := ms.Topo.Lookup(collection, volumeId)
 			isEc = ec
 			for _, loc := range machines {
+				if loc.IsErasureCoding {
+					isEcBusy = true
+					glog.V(3).Infof("-----master_server_handler:%s is ECoding......", loc.ServerAddress())
+				}
 				locations = append(locations, operation.Location{
 					Url:        loc.Url(),
 					PublicUrl:  loc.PublicUrl,
 					DataCenter: loc.GetDataCenterId(),
 					GrpcPort:   loc.GrpcPort,
+					Coding:     loc.IsErasureCoding,
 				})
 			}
 		}
@@ -178,6 +186,17 @@ func (ms *MasterServer) findVolumeLocation(collection, fileOrVolumeId string) op
 			}
 		}
 	}
+
+	// 添加排序逻辑，将non-coding节点排在前面
+	if len(selectedLocs) > 1 {
+		sort.SliceStable(selectedLocs, func(i, j int) bool {
+			return !selectedLocs[i].Coding && selectedLocs[j].Coding
+		})
+		if isEcBusy {
+			glog.V(3).Infof("need sort,after sort:%v", selectedLocs)
+		}
+	}
+
 	//fmt.Println("-----fileId:", fileOrVolumeId, " is a ec file,selectedLocs:", selectedLocs)
 	ret := operation.LookupResult{
 		VolumeOrFileId: vid,

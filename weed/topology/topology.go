@@ -459,3 +459,13 @@ func (t *Topology) EnableVacuum() {
 	glog.V(0).Infof("EnableVacuum")
 	t.isDisableVacuum = false
 }
+
+func (t *Topology) GetDataNode(ip string, port int) *DataNode {
+	// maybe an issue if lots of collections?
+	for _, c := range t.collectionMap.Items() {
+		if dn := c.(*Collection).GetDataNodeByIpAndPort(ip, port); dn != nil {
+			return dn
+		}
+	}
+	return nil
+}

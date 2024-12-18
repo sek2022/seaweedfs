@@ -63,6 +63,24 @@ func (vs *VolumeServer) VolumeEcShardsGenerate(ctx context.Context, req *volume_
 	if err != nil {
 		return nil, err
 	}
+	//set volume server is coding
+	if !vs.isECoding {
+		vs.isECoding = true
+		err = vs.notifyMasterVolumeServerECoding(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		if vs.isECoding {
+			//set volume server is not coding
+			vs.isECoding = false
+			err := vs.notifyMasterVolumeServerECoding(false)
+			if err != nil {
+				return
+			}
+		}
+	}()
 
 	// upload .ec00 ~ .ec13 files
 	if err := erasure_coding.UploadEcFiles(baseFileName, clientMap, req.Collection, req.VolumeId); err != nil {

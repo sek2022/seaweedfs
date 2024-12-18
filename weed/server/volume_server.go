@@ -51,6 +51,7 @@ type VolumeServer struct {
 	fileSizeLimitBytes      int64
 	isHeartbeating          bool
 	stopChan                chan bool
+	isECoding               bool
 }
 
 func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,

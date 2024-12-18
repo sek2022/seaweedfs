@@ -362,3 +362,23 @@ func (ms *MasterServer) VolumeGrow(ctx context.Context, req *master_pb.VolumeGro
 
 	return &master_pb.VolumeGrowResponse{}, nil
 }
+
+func (ms *MasterServer) VolumeServerECoding(ctx context.Context, req *master_pb.VolumeServerECodingRequest) (*master_pb.VolumeServerECodingResponse, error) {
+
+	if !ms.Topo.IsLeader() {
+		return nil, raft.NotLeaderError
+	}
+
+	resp := &master_pb.VolumeServerECodingResponse{}
+
+	dn := ms.Topo.GetDataNode(req.Ip, int(req.Port))
+
+	if dn != nil {
+		dn.Lock()
+		dn.IsErasureCoding = req.IsErasureCoding
+		dn.Unlock()
+		glog.V(0).Infof("------set dataNode is coding ip:%s, port:%d, coding:%v", req.Ip, req.Port, req.IsErasureCoding)
+	}
+
+	return resp, nil
+}
