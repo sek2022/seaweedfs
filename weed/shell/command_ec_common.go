@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/seaweedfs/seaweedfs/weed/wdclient"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -46,27 +47,37 @@ type EcBusyServerProcessor struct {
 	busyServersLock sync.RWMutex
 }
 
+type VolumeEcAllocator struct {
+	VolumeId       needle.VolumeId
+	Choose         wdclient.Location                       //coding server
+	Locations      []wdclient.Location                     //all location for volume
+	AllocatedEcIds map[string]*volume_server_pb.EcShardIds //ec shards 分配
+	AllocatedNodes map[string]*EcNode                      //分配到的node
+}
+
 func (ecBs *EcBusyServerProcessor) add(server string, volumeId needle.VolumeId) {
 	ecBs.busyServersLock.Lock()
+	defer ecBs.busyServersLock.Unlock()
 	ecBs.busyServers[server] = volumeId
-	ecBs.busyServersLock.Unlock()
 }
 
 func (ecBs *EcBusyServerProcessor) inUse(server string) bool {
 	ecBs.busyServersLock.RLock()
+	defer ecBs.busyServersLock.RUnlock()
 	if v, b := ecBs.busyServers[server]; b {
 		if v > 0 {
 			return true
 		}
 	}
-	ecBs.busyServersLock.RUnlock()
+
 	return false
 }
 
 func (ecBs *EcBusyServerProcessor) remove(server string) {
 	ecBs.busyServersLock.Lock()
+	defer ecBs.busyServersLock.Unlock()
 	ecBs.busyServers[server] = 0
-	ecBs.busyServersLock.Unlock()
+
 }
 
 func NewEcBusyServerProcessor() *EcBusyServerProcessor {
