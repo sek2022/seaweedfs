@@ -79,6 +79,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		return
 	}
 
+	startTime := time.Now()
 	// collect topology information
 	topologyInfo, _, err := collectTopologyInfo(commandEnv, 0)
 	if err != nil {
@@ -123,7 +124,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 			glog.V(0).Infof("End loop process volumes, max volumeId:%d, min volumeId:%d", *maxVolumesId, volumeIds[0])
 			break
 		}
-		fmt.Printf("ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
+		glog.V(0).Infof("ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
 		processVolumeIds := volumeIds
 		if len(volumeIds) > maxProcessNum {
 			processVolumeIds = volumeIds[0:maxProcessNum]
@@ -152,16 +153,20 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 			}(commandEnv, *collection, vid, locations, chooseLoc, *parallelCopy)
 		}
 		wg.Wait()
-		if len(errors) > 0 {
-			return errors[0]
-		}
+
 		//sleep 5s
 		time.Sleep(5 * time.Second)
 		volumeIds, err = collectVolumeIdsForEcEncode(commandEnv, *collection, *fullPercentage, *quietPeriod)
 		if err != nil {
 			return err
 		}
+
+		if len(errors) > 0 {
+			return errors[0]
+		}
+
 	}
+	glog.V(0).Infof("ec end, total second time:%d s!", time.Now().Second()-startTime.Second())
 	return nil
 }
 
@@ -326,7 +331,7 @@ func doEcEncode(commandEnv *CommandEnv, collection string, vid needle.VolumeId, 
 
 func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, collection string, sourceVolumeServer pb.ServerAddress) error {
 
-	fmt.Printf("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
+	glog.V(0).Infof("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
 	allEcNodes, totalFreeEcSlots, err := collectEcNodes(commandEnv)
 	if err != nil {
 		return err
@@ -343,12 +348,26 @@ func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, 
 
 	//Ensure EcNodes come from different rack, Prevent uneven distribution
 	allocatedDataNodes := getEcNodesMustDifferentRacks(allEcNodes, ecb)
+	if allocatedDataNodes == nil || len(allocatedDataNodes) <= 0 {
+		glog.V(0).Infof("allocated data nodes Insufficient quantity, volumeId ec failed,vid: %d", volumeId)
+		return fmt.Errorf("allocated data nodes Insufficient quantity, volumeId ec failed,vid: %d", volumeId)
+	}
+
 	if len(allocatedDataNodes) > erasure_coding.TotalShardsCount {
 		allocatedDataNodes = allocatedDataNodes[:erasure_coding.TotalShardsCount]
 	}
 
-	// calculate how many shards to allocate for these servers
-	allocatedEcIds, allocatedNodes := balancedEcDistribution2(allocatedDataNodes)
+	// calculate how many shards to allocate for these servers，分配存储ec的server
+	//allocatedEcIds {"192.168.10.1:1001": [1,2,9], "192.168.10.1:1002": [3,4,8], "192.168.10.1:1003": [5,6,7]}
+	//allocatedNodes {"192.168.10.1:1001": node, "192.168.10.1:1002": node, "192.168.10.1:1003": node}
+	allocatedEcIds, allocatedNodes := balancedEcDistribution2(allocatedDataNodes, volumeId)
+
+	defer func() {
+		for key, _ := range allocatedEcIds {
+			//释放当前server
+			ecBusyServerProcessor.remove(key)
+		}
+	}()
 
 	err2 := operation.WithVolumeServerClient(false, sourceVolumeServer, commandEnv.option.GrpcDialOption, func(volumeServerClient volume_server_pb.VolumeServerClient) error {
 		_, genErr := volumeServerClient.VolumeEcShardsGenerate(context.Background(), &volume_server_pb.VolumeEcShardsGenerateRequest{
@@ -401,6 +420,13 @@ func getEcNodesMustDifferentRacks(allEcNodes []*EcNode, ecb *ecBalancer) []*EcNo
 	averageShardsPerEcRack := ceilDivide(erasure_coding.TotalShardsCount, len(racks))
 	var rackEcNodes = make(map[string][]*EcNode)
 	for _, node := range allEcNodes {
+		serverAddress := pb.NewServerAddressWithGrpcPort(node.info.Id, int(node.info.GrpcPort))
+		key := serverAddress.String()
+		//查看当前server是否正在被使用
+		if ecBusyServerProcessor.inUse(key) {
+			continue
+		}
+
 		if _, b := rackEcNodes[string(node.rack)]; !b {
 			arr := make([]*EcNode, 0)
 			rackEcNodes[string(node.rack)] = arr
@@ -410,6 +436,13 @@ func getEcNodesMustDifferentRacks(allEcNodes []*EcNode, ecb *ecBalancer) []*EcNo
 		}
 		rackEcNodes[string(node.rack)] = append(rackEcNodes[string(node.rack)], node)
 	}
+	minRackSize := len(racks) - 1
+	//如果可用机柜不足则返回空
+	if len(rackEcNodes) < minRackSize {
+		glog.V(0).Infof("rack insuffic size:%d, min racks:%d", len(rackEcNodes), minRackSize)
+		return nil
+	}
+
 	rackNodesSlice := make([]*EcNode, 0)
 	for _, value := range rackEcNodes {
 		for _, node := range value {
@@ -553,7 +586,9 @@ func balancedEcDistribution(servers []*EcNode) (allocated [][]uint32) {
 	return allocated
 }
 
-func balancedEcDistribution2(servers []*EcNode) (map[string]*volume_server_pb.EcShardIds, map[string]*EcNode) {
+// allocatedEcIds {"192.168.10.1:1001": [1,2,9], "192.168.10.1:1002": [3,4,8], "192.168.10.1:1003": [5,6,7]}
+// allocatedNodes {"192.168.10.1:1001": node, "192.168.10.1:1002": node, "192.168.10.1:1003": node}
+func balancedEcDistribution2(servers []*EcNode, volumeId needle.VolumeId) (map[string]*volume_server_pb.EcShardIds, map[string]*EcNode) {
 	allocated := make(map[string]*volume_server_pb.EcShardIds, len(servers))
 	allocatedNodes := make(map[string]*EcNode, len(servers))
 	allocatedShardIdIndex := uint32(0)
@@ -569,6 +604,8 @@ func balancedEcDistribution2(servers []*EcNode) (map[string]*volume_server_pb.Ec
 			allocated[key].ShardIds = append(allocated[key].ShardIds, allocatedShardIdIndex)
 			allocatedNodes[key] = node
 			allocatedShardIdIndex++
+			//添加到管理器
+			ecBusyServerProcessor.add(key, volumeId)
 		}
 		serverIndex++
 		if serverIndex >= len(servers) {

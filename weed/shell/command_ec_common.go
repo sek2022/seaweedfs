@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
@@ -38,6 +39,39 @@ type CandidateEcNode struct {
 type EcRack struct {
 	ecNodes    map[EcNodeId]*EcNode
 	freeEcSlot int
+}
+
+type EcBusyServerProcessor struct {
+	busyServers     map[string]needle.VolumeId
+	busyServersLock sync.RWMutex
+}
+
+func (ecBs *EcBusyServerProcessor) add(server string, volumeId needle.VolumeId) {
+	ecBs.busyServersLock.Lock()
+	ecBs.busyServers[server] = volumeId
+	ecBs.busyServersLock.Unlock()
+}
+
+func (ecBs *EcBusyServerProcessor) inUse(server string) bool {
+	ecBs.busyServersLock.RLock()
+	if v, b := ecBs.busyServers[server]; b {
+		if v > 0 {
+			return true
+		}
+	}
+	ecBs.busyServersLock.RUnlock()
+	return false
+}
+
+func (ecBs *EcBusyServerProcessor) remove(server string) {
+	ecBs.busyServersLock.Lock()
+	ecBs.busyServers[server] = 0
+	ecBs.busyServersLock.Unlock()
+}
+
+func NewEcBusyServerProcessor() *EcBusyServerProcessor {
+	processor := &EcBusyServerProcessor{busyServers: make(map[string]needle.VolumeId)}
+	return processor
 }
 
 var (
@@ -109,6 +143,8 @@ var (
 	`
 	// Overridable functions for testing.
 	getDefaultReplicaPlacement = _getDefaultReplicaPlacement
+
+	ecBusyServerProcessor = NewEcBusyServerProcessor()
 )
 
 func _getDefaultReplicaPlacement(commandEnv *CommandEnv) (*super_block.ReplicaPlacement, error) {
