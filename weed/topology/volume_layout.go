@@ -428,10 +428,11 @@ func (vl *VolumeLayout) removeFromWritable(vid needle.VolumeId) bool {
 			break
 		}
 	}
-	vl.removeFromCrowded(vid)
+
 	if toDeleteIndex >= 0 {
 		glog.V(0).Infoln("Volume", vid, "becomes unwritable")
 		vl.writables = append(vl.writables[0:toDeleteIndex], vl.writables[toDeleteIndex+1:]...)
+		vl.removeFromCrowded(vid)
 		return true
 	}
 	return false
