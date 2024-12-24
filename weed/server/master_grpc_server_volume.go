@@ -49,7 +49,7 @@ func (ms *MasterServer) ProcessGrowRequest() {
 			if firstRun {
 				firstRun = false
 			} else {
-				time.Sleep(1*time.Minute + time.Duration(30*rand.Float32())*time.Second)
+				time.Sleep(2*time.Minute + time.Duration(30*rand.Float32())*time.Second)
 			}
 			if !ms.Topo.IsLeader() {
 				continue
@@ -59,11 +59,17 @@ func (ms *MasterServer) ProcessGrowRequest() {
 			for _, vlc := range ms.Topo.ListVolumeLayoutCollections() {
 				vl := vlc.VolumeLayout
 				lastGrowCount := vl.GetLastGrowCount()
+
+				if lastGrowCount < ms.option.MinWriteableVolumeSize {
+					lastGrowCount = ms.option.MinWriteableVolumeSize
+				}
 				if vl.HasGrowRequest() {
 					continue
 				}
 				writable, crowded := vl.GetWritableVolumeCount()
 				mustGrow := int(lastGrowCount) - writable
+				glog.V(0).Infof("lastGrowCount:%d, writable:%d, mustGrow:%d \n", lastGrowCount, writable, mustGrow)
+
 				vgr := vlc.ToVolumeGrowRequest()
 				stats.MasterVolumeLayoutWritable.WithLabelValues(vlc.Collection, vgr.DiskType, vgr.Replication, vgr.Ttl).Set(float64(writable))
 				stats.MasterVolumeLayoutCrowded.WithLabelValues(vlc.Collection, vgr.DiskType, vgr.Replication, vgr.Ttl).Set(float64(crowded))
