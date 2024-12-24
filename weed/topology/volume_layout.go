@@ -448,6 +448,22 @@ func (vl *VolumeLayout) setVolumeWritable(vid needle.VolumeId) bool {
 	return true
 }
 
+func (vl *VolumeLayout) volumeIsWritable(vid needle.VolumeId) bool {
+	for _, v := range vl.writables {
+		if v == vid {
+			return true
+		}
+	}
+	return false
+}
+
+func (vl *VolumeLayout) volumeIsCrowed(vid needle.VolumeId) bool {
+	if _, b := vl.crowded[vid]; b {
+		return true
+	}
+	return false
+}
+
 func (vl *VolumeLayout) SetVolumeReadOnly(dn *DataNode, vid needle.VolumeId) bool {
 	vl.accessLock.Lock()
 	defer vl.accessLock.Unlock()

@@ -124,6 +124,34 @@
         </div>
 
         <div class="col-sm-12">
+            <h2>Writeable Volumes</h2>
+            <table class="table table-striped">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Collection</th>
+                    <th>Volume Id</th>
+                    <th>Nodes</th>
+                    <th>Crowded</th>
+                </tr>
+                </thead>
+                {{ range $readonly_index, $data := .Topology.Statistics.WriteableVolumes }}
+                <tr>
+                    <td>{{$readonly_index}}</td>
+                    <td>{{$data.Collection}}</td>
+                    <td>{{$data.VolumeId}}</td>
+                    <td>
+                        {{ range $url_index, $url := $data.Urls }}
+                        <a href="{{ url $url }}/ui/index.html">{{ $url }}</a> <br>
+                        {{ end }}
+                    </td>
+                    <td>{{$data.IsCrowed}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div class="col-sm-12">
             <h2>Wait Fix Replication Volume</h2>
             <table class="table table-striped">
                 <thead>

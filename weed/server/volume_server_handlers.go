@@ -15,7 +15,7 @@ import (
 	"github.com/seaweedfs/seaweedfs/weed/stats"
 )
 
-const MaxWaitUploadDataSize = 2 * 1024 * 1024 * 1024
+const MaxWaitUploadDataSize = 500 * 1024 * 1024 //500M
 
 /*
 
