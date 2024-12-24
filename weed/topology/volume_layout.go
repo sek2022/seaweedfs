@@ -302,7 +302,7 @@ func (vl *VolumeLayout) PickForWrite(count uint64, option *VolumeGrowOption) (vi
 
 	lenWriters := len(vl.writables)
 	if lenWriters <= 0 {
-		return 0, 0, nil, true, fmt.Errorf("%s", NoWritableVolumes)
+		return 0, 0, nil, true, fmt.Errorf("len:%d, %s", len(vl.writables), NoWritableVolumes)
 	}
 	if option.DataCenter == "" && option.Rack == "" && option.DataNode == "" {
 		vid := vl.writables[rand.IntN(lenWriters)]

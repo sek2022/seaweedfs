@@ -255,7 +255,7 @@ func (ms *MasterServer) dirAssignHandler(w http.ResponseWriter, r *http.Request)
 		if shouldGrow && !vl.HasGrowRequest() {
 			glog.V(0).Infof("dirAssign volume growth %v from %v", option.String(), r.RemoteAddr)
 			if err != nil && ms.Topo.AvailableSpaceFor(option) <= 0 {
-				err = fmt.Errorf("%s and no free volumes left for %s", err.Error(), option.String())
+				err = fmt.Errorf("%s and no free m1 volumes left for %s", err.Error(), option.String())
 			}
 			vl.AddGrowRequest()
 			ms.volumeGrowthRequestChan <- &topology.VolumeGrowRequest{
