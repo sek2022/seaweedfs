@@ -85,11 +85,12 @@ func (ms *MasterServer) Assign(ctx context.Context, req *master_pb.AssignRequest
 	)
 
 	for time.Now().Sub(startTime) < maxTimeout {
+		glog.V(0).Infof("assign err, req: %v option: %v", req, option.String())
+
 		fid, count, dnList, shouldGrow, err := ms.Topo.PickForWrite(req.Count, option, vl)
 		if shouldGrow && !vl.HasGrowRequest() {
-			availableSpace := ms.Topo.AvailableSpaceFor(option)
-			if err != nil && availableSpace <= 0 {
-				glog.V(0).Infof("assign err, req: %v option: %v, availableSpace:%d, err: %v", req, option.String(), availableSpace, err)
+			if err != nil && ms.Topo.AvailableSpaceFor(option) <= 0 {
+				glog.V(0).Infof("assign err, req: %v option: %v, err: %v", req, option.String(), err)
 				err = fmt.Errorf("%s and no free volumes left for %s", err.Error(), option.String())
 			}
 			vl.AddGrowRequest()
