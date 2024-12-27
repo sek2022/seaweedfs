@@ -77,9 +77,7 @@ func (vs *VolumeServer) privateStoreHandler(w http.ResponseWriter, r *http.Reque
 		contentLength := getContentLength(r)
 		// exclude the replication from the concurrentUploadLimitMB
 		if r.URL.Query().Get("type") != "replicate" && vs.concurrentUploadLimit != 0 {
-			startTime := time.Now()
-			vs.inFlightUploadDataLimitCond.L.Lock()
-			inFlightUploadDataSize := atomic.LoadInt64(&vs.inFlightUploadDataSize)
+
 			inWaitUploadDataSize := atomic.LoadInt64(&vs.inWaitUploadDataSize)
 			//防止内存溢出,上传等待不能超过MaxWaitUploadDataSize
 			if inWaitUploadDataSize > MaxWaitUploadDataSize {
@@ -94,6 +92,9 @@ func (vs *VolumeServer) privateStoreHandler(w http.ResponseWriter, r *http.Reque
 				atomic.AddInt64(&vs.inWaitUploadDataSize, -contentLength)
 			}()
 
+			startTime := time.Now()
+			vs.inFlightUploadDataLimitCond.L.Lock()
+			inFlightUploadDataSize := atomic.LoadInt64(&vs.inFlightUploadDataSize)
 			for inFlightUploadDataSize > vs.concurrentUploadLimit {
 				//wait timeout check
 				if startTime.Add(vs.inflightUploadDataTimeout).Before(time.Now()) {
