@@ -78,19 +78,19 @@ func (vs *VolumeServer) privateStoreHandler(w http.ResponseWriter, r *http.Reque
 		// exclude the replication from the concurrentUploadLimitMB
 		if r.URL.Query().Get("type") != "replicate" && vs.concurrentUploadLimit != 0 {
 
-			inWaitUploadDataSize := atomic.LoadInt64(&vs.inWaitUploadDataSize)
-			//防止内存溢出,上传等待不能超过MaxWaitUploadDataSize
-			if inWaitUploadDataSize > MaxWaitUploadDataSize {
-				err := fmt.Errorf("inWaitUploadDataSize too many:%d", inWaitUploadDataSize)
-				glog.V(0).Infof("too many requests: %v", err)
-				writeJsonError(w, r, http.StatusTooManyRequests, err)
-				return
-			}
+			// inWaitUploadDataSize := atomic.LoadInt64(&vs.inWaitUploadDataSize)
+			// //防止内存溢出,上传等待不能超过MaxWaitUploadDataSize
+			// if inWaitUploadDataSize > MaxWaitUploadDataSize {
+			// 	err := fmt.Errorf("inWaitUploadDataSize too many:%d", inWaitUploadDataSize)
+			// 	glog.V(0).Infof("too many requests: %v", err)
+			// 	writeJsonError(w, r, http.StatusTooManyRequests, err)
+			// 	return
+			// }
 
-			atomic.AddInt64(&vs.inWaitUploadDataSize, contentLength)
-			defer func() {
-				atomic.AddInt64(&vs.inWaitUploadDataSize, -contentLength)
-			}()
+			// atomic.AddInt64(&vs.inWaitUploadDataSize, contentLength)
+			// defer func() {
+			// 	atomic.AddInt64(&vs.inWaitUploadDataSize, -contentLength)
+			// }()
 
 			startTime := time.Now()
 			vs.inFlightUploadDataLimitCond.L.Lock()
