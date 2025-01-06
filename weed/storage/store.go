@@ -607,6 +607,7 @@ func (s *Store) DeleteVolume(i needle.VolumeId, onlyEmpty bool, afterEc bool) er
 			collectionVolumeSize[v.Collection] = 0
 			glog.V(0).Infof("DeleteVolume %d", i)
 			//statics after delete volume
+			location.volumesLock.RLock()
 			for _, sv := range location.volumes {
 				_, volumeMessage := sv.ToVolumeInformationMessage()
 				if volumeMessage == nil {
@@ -617,6 +618,7 @@ func (s *Store) DeleteVolume(i needle.VolumeId, onlyEmpty bool, afterEc bool) er
 				}
 				collectionVolumeSize[sv.Collection] += int64(volumeMessage.Size)
 			}
+			location.volumesLock.RUnlock()
 
 			if collectionVolumeSize[v.Collection] == 0 { //If location.volumes change to empty after delete, Must notice to (VolumeServerDiskSizeGauge), Otherwise monitor will display error
 				stats.VolumeServerDiskSizeGauge.WithLabelValues(v.Collection, "normal").Set(float64(0))

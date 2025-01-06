@@ -52,7 +52,6 @@ type VolumeServer struct {
 	isHeartbeating          bool
 	stopChan                chan bool
 	isECoding               bool
-	inWaitUploadDataSize    int64
 }
 
 func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
@@ -106,7 +105,6 @@ func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
 		readBufferSizeMB:              readBufferSizeMB,
 		ldbTimout:                     ldbTimeout,
 		whiteList:                     whiteList,
-		inWaitUploadDataSize:          int64(0),
 	}
 
 	whiteList = append(whiteList, util.StringSplit(v.GetString("guard.white_list"), ",")...)
