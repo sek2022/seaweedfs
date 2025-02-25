@@ -4,14 +4,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
-
 	"github.com/seaweedfs/seaweedfs/weed/operation"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
 	"google.golang.org/grpc"
+	"io"
+	"sync"
+	"sync/atomic"
 )
 
 func init() {
@@ -100,6 +101,18 @@ func (c *commandEcRebuild) Do(args []string, commandEnv *CommandEnv, writer io.W
 	return nil
 }
 
+// 添加线程安全的writer包装器
+type syncWriter struct {
+	writer io.Writer
+	mu     *sync.Mutex
+}
+
+func (w *syncWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.Write(p)
+}
+
 func rebuildEcVolumes(commandEnv *CommandEnv, allEcNodes []*EcNode, collection string, writer io.Writer, applyChanges bool) error {
 
 	fmt.Printf("rebuildEcVolumes %s\n", collection)
@@ -110,6 +123,36 @@ func rebuildEcVolumes(commandEnv *CommandEnv, allEcNodes []*EcNode, collection s
 		ecShardMap.registerEcNode(ecNode, collection)
 	}
 
+	// 先对节点进行一次排序
+	sortEcNodesByFreeslotsDescending(allEcNodes)
+	if len(allEcNodes) == 0 {
+		return fmt.Errorf("no nodes available for rebuilding")
+	}
+	// 计算有足够空间的节点数
+	nodeCount := 0
+	for i := 0; i < len(allEcNodes); i++ {
+		if allEcNodes[i].freeEcSlot >= erasure_coding.TotalShardsCount {
+			nodeCount++
+			if nodeCount > 3 { // 如果超过3个可用节点，使用前3个即可
+				nodeCount = 3
+				break
+			}
+		} else {
+			break // 由于已经排序，遇到空间不足的节点就可以停止
+		}
+	}
+
+	if nodeCount == 0 {
+		return fmt.Errorf("no nodes have enough space for rebuilding")
+	}
+
+	// 使用可用节点数作为最大并发数
+	sem := make(chan struct{}, nodeCount)
+	errChan := make(chan error, len(ecShardMap))
+	var rebuilding sync.WaitGroup
+	var writerMu sync.Mutex
+	var currentIndex atomic.Int32
+
 	for vid, locations := range ecShardMap {
 		shardCount := locations.shardCount()
 		if shardCount == erasure_coding.TotalShardsCount {
@@ -119,13 +162,31 @@ func rebuildEcVolumes(commandEnv *CommandEnv, allEcNodes []*EcNode, collection s
 			return fmt.Errorf("ec volume %d is unrepairable with %d shards\n", vid, shardCount)
 		}
 
-		sortEcNodesByFreeslotsDescending(allEcNodes)
+		rebuilding.Add(1)
+		go func(vid needle.VolumeId, locations EcShardLocations) {
+			defer rebuilding.Done()
+			sem <- struct{}{}                               // 获取信号量
+			index := int(currentIndex.Add(1)-1) % nodeCount // 确保index在[0, nodeCount-1]范围内
+			defer func() {
+				<-sem // 释放信号量
+			}()
+			// 使用固定的节点处理任务
+			rebuilder := allEcNodes[index]
+			safeWriter := &syncWriter{writer: writer, mu: &writerMu}
+			if err := rebuildOneEcVolume(commandEnv, rebuilder, collection, vid, locations, safeWriter, applyChanges); err != nil {
+				fmt.Println(vid, ",generateMissingShards:", err)
+				errChan <- err
+			}
+		}(vid, locations)
+	}
 
-		if allEcNodes[0].freeEcSlot < erasure_coding.TotalShardsCount {
-			return fmt.Errorf("disk space is not enough")
-		}
+	// 等待所有重建任务完成
+	rebuilding.Wait()
+	close(errChan)
 
-		if err := rebuildOneEcVolume(commandEnv, allEcNodes[0], collection, vid, locations, writer, applyChanges); err != nil {
+	// 检查是否有错误发生
+	for err := range errChan {
+		if err != nil {
 			return err
 		}
 	}

@@ -201,3 +201,7 @@ func TestSyscall(t *testing.T) {
 	//err := syscall.Fallocate(int(file.Fd()), FallocFlPunchHole, offset, length)
 	//syscall.Fall
 }
+
+func Test222(t *testing.T) {
+	fmt.Println(2 % 3)
+}
