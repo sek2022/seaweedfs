@@ -4,15 +4,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
+	"sync"
+
 	"github.com/seaweedfs/seaweedfs/weed/operation"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
 	"google.golang.org/grpc"
-	"io"
-	"sync"
-	"sync/atomic"
 )
 
 func init() {
@@ -29,7 +29,7 @@ func (c *commandEcRebuild) Name() string {
 func (c *commandEcRebuild) Help() string {
 	return `find and rebuild missing ec shards among volume servers
 
-	ec.rebuild [-c EACH_COLLECTION|<collection_name>] [-force]
+	ec.rebuild [-c EACH_COLLECTION|<collection_name>] [-force] [-concurrent maximum_concurrent_rebuilding]
 
 	Algorithm:
 
@@ -65,10 +65,16 @@ func (c *commandEcRebuild) Do(args []string, commandEnv *CommandEnv, writer io.W
 	fixCommand := flag.NewFlagSet(c.Name(), flag.ContinueOnError)
 	collection := fixCommand.String("collection", "EACH_COLLECTION", "collection name, or \"EACH_COLLECTION\" for each collection")
 	applyChanges := fixCommand.Bool("force", false, "apply the changes")
+	concurrent := fixCommand.Int("concurrent", 3, "maximum number of concurrent rebuilding")
+
 	if err = fixCommand.Parse(args); err != nil {
 		return nil
 	}
 	infoAboutSimulationMode(writer, *applyChanges, "-force")
+	maxConcurrent := *concurrent
+	if maxConcurrent < 1 {
+		return fmt.Errorf("concurrent must be greater than 0")
+	}
 
 	if err = commandEnv.confirmIsLocked(args); err != nil {
 		return
@@ -88,12 +94,12 @@ func (c *commandEcRebuild) Do(args []string, commandEnv *CommandEnv, writer io.W
 		fmt.Printf("rebuildEcVolumes collections %+v\n", len(collections))
 		for _, c := range collections {
 			fmt.Printf("rebuildEcVolumes collection %+v\n", c)
-			if err = rebuildEcVolumes(commandEnv, allEcNodes, c, writer, *applyChanges); err != nil {
+			if err = rebuildEcVolumes(commandEnv, allEcNodes, c, writer, *applyChanges, maxConcurrent); err != nil {
 				return err
 			}
 		}
 	} else {
-		if err = rebuildEcVolumes(commandEnv, allEcNodes, *collection, writer, *applyChanges); err != nil {
+		if err = rebuildEcVolumes(commandEnv, allEcNodes, *collection, writer, *applyChanges, maxConcurrent); err != nil {
 			return err
 		}
 	}
@@ -101,7 +107,146 @@ func (c *commandEcRebuild) Do(args []string, commandEnv *CommandEnv, writer io.W
 	return nil
 }
 
-// 添加线程安全的writer包装器
+//func rebuildEcVolumes(commandEnv *CommandEnv, allEcNodes []*EcNode, collection string, writer io.Writer, applyChanges bool) error {
+//
+//	fmt.Printf("rebuildEcVolumes %s\n", collection)
+//
+//	// collect vid => each shard locations, similar to ecShardMap in topology.go
+//	ecShardMap := make(EcShardMap)
+//	for _, ecNode := range allEcNodes {
+//		ecShardMap.registerEcNode(ecNode, collection)
+//	}
+//
+//	for vid, locations := range ecShardMap {
+//		shardCount := locations.shardCount()
+//		if shardCount == erasure_coding.TotalShardsCount {
+//			continue
+//		}
+//		if shardCount < erasure_coding.DataShardsCount {
+//			return fmt.Errorf("ec volume %d is unrepairable with %d shards\n", vid, shardCount)
+//		}
+//
+//		sortEcNodesByFreeslotsDescending(allEcNodes)
+//
+//		if allEcNodes[0].freeEcSlot < erasure_coding.TotalShardsCount {
+//			return fmt.Errorf("disk space is not enough")
+//		}
+//
+//		if err := rebuildOneEcVolume(commandEnv, allEcNodes[0], collection, vid, locations, writer, applyChanges); err != nil {
+//			return err
+//		}
+//	}
+//
+//	return nil
+//}
+
+func rebuildEcVolumes(commandEnv *CommandEnv, allEcNodes []*EcNode, collection string, writer io.Writer, applyChanges bool, maxConcurrent int) error {
+	fmt.Printf("rebuildEcVolumes %s with max concurrent %d \n", collection, maxConcurrent)
+
+	// collect vid => each shard locations
+	ecShardMap := make(EcShardMap)
+	for _, ecNode := range allEcNodes {
+		ecShardMap.registerEcNode(ecNode, collection)
+	}
+
+	if len(allEcNodes) == 0 {
+		return fmt.Errorf("no nodes available for rebuilding")
+	}
+
+	type rebuildTask struct {
+		vid       needle.VolumeId
+		locations EcShardLocations
+	}
+
+	var mapMu sync.Mutex // 添加互斥锁保护map操作
+
+	// 获取需要重建的任务
+	getTasksToRebuild := func() ([]rebuildTask, error) {
+		mapMu.Lock()
+		defer mapMu.Unlock()
+
+		var tasks []rebuildTask
+		for vid, locations := range ecShardMap {
+			shardCount := locations.shardCount()
+			if shardCount == erasure_coding.TotalShardsCount {
+				continue
+			}
+			if shardCount < erasure_coding.DataShardsCount {
+				return nil, fmt.Errorf("ec volume %d is unrepairable with %d shards\n", vid, shardCount)
+			}
+			tasks = append(tasks, rebuildTask{vid: vid, locations: locations})
+		}
+		return tasks, nil
+	}
+
+	var writerMu sync.Mutex
+	safeWriter := &syncWriter{writer: writer, mu: &writerMu}
+
+	// 循环处理所有任务
+	for {
+		// 对节点进行排序
+		sortEcNodesByFreeslotsDescending(allEcNodes)
+
+		// 计算可用节点数
+		nodeCount := 0
+		for i := 0; i < len(allEcNodes); i++ {
+			if allEcNodes[i].freeEcSlot >= erasure_coding.TotalShardsCount {
+				nodeCount++
+				if nodeCount >= maxConcurrent {
+					break
+				}
+			} else {
+				break
+			}
+		}
+		if nodeCount == 0 {
+			return fmt.Errorf("no nodes have enough space for rebuilding")
+		}
+
+		// 获取待处理任务
+		tasks, err := getTasksToRebuild()
+		if err != nil {
+			return err
+		}
+		if len(tasks) == 0 {
+			break // 所有任务处理完成
+		}
+
+		// 创建错误通道和等待组
+		errChan := make(chan error, nodeCount)
+		var wg sync.WaitGroup
+
+		// 并发处理任务，最多使用nodeCount个节点
+		for i := 0; i < len(tasks) && i < nodeCount; i++ {
+			wg.Add(1)
+			go func(task rebuildTask, nodeIndex int) {
+				defer wg.Done()
+				if err := rebuildOneEcVolume(commandEnv, allEcNodes[nodeIndex], collection, task.vid, task.locations, safeWriter, applyChanges); err != nil {
+					errChan <- err
+				} else {
+					// 处理完成后从ecShardMap中移除
+					mapMu.Lock()
+					delete(ecShardMap, task.vid)
+					mapMu.Unlock()
+				}
+			}(tasks[i], i)
+		}
+
+		// 等待当前批次完成
+		wg.Wait()
+		close(errChan)
+
+		// 检查错误
+		for err := range errChan {
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 type syncWriter struct {
 	writer io.Writer
 	mu     *sync.Mutex
@@ -111,87 +256,6 @@ func (w *syncWriter) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.writer.Write(p)
-}
-
-func rebuildEcVolumes(commandEnv *CommandEnv, allEcNodes []*EcNode, collection string, writer io.Writer, applyChanges bool) error {
-
-	fmt.Printf("rebuildEcVolumes %s\n", collection)
-
-	// collect vid => each shard locations, similar to ecShardMap in topology.go
-	ecShardMap := make(EcShardMap)
-	for _, ecNode := range allEcNodes {
-		ecShardMap.registerEcNode(ecNode, collection)
-	}
-
-	// 先对节点进行一次排序
-	sortEcNodesByFreeslotsDescending(allEcNodes)
-	if len(allEcNodes) == 0 {
-		return fmt.Errorf("no nodes available for rebuilding")
-	}
-	// 计算有足够空间的节点数
-	nodeCount := 0
-	for i := 0; i < len(allEcNodes); i++ {
-		if allEcNodes[i].freeEcSlot >= erasure_coding.TotalShardsCount {
-			nodeCount++
-			if nodeCount > 3 { // 如果超过3个可用节点，使用前3个即可
-				nodeCount = 3
-				break
-			}
-		} else {
-			break // 由于已经排序，遇到空间不足的节点就可以停止
-		}
-	}
-
-	if nodeCount == 0 {
-		return fmt.Errorf("no nodes have enough space for rebuilding")
-	}
-
-	// 使用可用节点数作为最大并发数
-	sem := make(chan struct{}, nodeCount)
-	errChan := make(chan error, len(ecShardMap))
-	var rebuilding sync.WaitGroup
-	var writerMu sync.Mutex
-	var currentIndex atomic.Int32
-
-	for vid, locations := range ecShardMap {
-		shardCount := locations.shardCount()
-		if shardCount == erasure_coding.TotalShardsCount {
-			continue
-		}
-		if shardCount < erasure_coding.DataShardsCount {
-			return fmt.Errorf("ec volume %d is unrepairable with %d shards\n", vid, shardCount)
-		}
-
-		rebuilding.Add(1)
-		go func(vid needle.VolumeId, locations EcShardLocations) {
-			defer rebuilding.Done()
-			sem <- struct{}{}                               // 获取信号量
-			index := int(currentIndex.Add(1)-1) % nodeCount // 确保index在[0, nodeCount-1]范围内
-			defer func() {
-				<-sem // 释放信号量
-			}()
-			// 使用固定的节点处理任务
-			rebuilder := allEcNodes[index]
-			safeWriter := &syncWriter{writer: writer, mu: &writerMu}
-			if err := rebuildOneEcVolume(commandEnv, rebuilder, collection, vid, locations, safeWriter, applyChanges); err != nil {
-				fmt.Println(vid, ",generateMissingShards:", err)
-				errChan <- err
-			}
-		}(vid, locations)
-	}
-
-	// 等待所有重建任务完成
-	rebuilding.Wait()
-	close(errChan)
-
-	// 检查是否有错误发生
-	for err := range errChan {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func rebuildOneEcVolume(commandEnv *CommandEnv, rebuilder *EcNode, collection string, volumeId needle.VolumeId, locations EcShardLocations, writer io.Writer, applyChanges bool) error {
