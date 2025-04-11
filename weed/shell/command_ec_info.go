@@ -68,7 +68,7 @@ func (c *commandEcInfo) Do(args []string, commandEnv *CommandEnv, writer io.Writ
 		}
 
 		if len(volumeIds) == 0 {
-			fmt.Fprintf(writer, "集合 %s 中没有需要EC编码的卷\n", *collection)
+			fmt.Fprintf(writer, "集合 [%s] 中没有需要EC编码的卷\n", *collection)
 		} else {
 			fmt.Fprintf(writer, "集合 [%s] 中待EC编码的卷数量: %d\n", *collection, len(volumeIds))
 

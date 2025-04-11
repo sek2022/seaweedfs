@@ -2,11 +2,12 @@ package erasure_coding
 
 import (
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
-	"github.com/seaweedfs/seaweedfs/weed/storage/volume_info"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
+	"github.com/seaweedfs/seaweedfs/weed/storage/volume_info"
 
 	"github.com/klauspost/reedsolomon"
 
@@ -19,7 +20,7 @@ import (
 
 const (
 	DataShardsCount             = 10
-	ParityShardsCount           = 4
+	ParityShardsCount           = 2
 	TotalShardsCount            = DataShardsCount + ParityShardsCount
 	ErasureCodingLargeBlockSize = 1024 * 1024 * 1024 // 1GB
 	ErasureCodingSmallBlockSize = 1024 * 1024
