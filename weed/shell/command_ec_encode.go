@@ -4,13 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"google.golang.org/grpc"
 	"io"
 	"math/rand"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/operation"
@@ -124,7 +125,16 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 			glog.V(0).Infof("End loop process volumes, max volumeId:%d, min volumeId:%d", *maxVolumesId, volumeIds[0])
 			break
 		}
-		glog.V(0).Infof("ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
+
+		// 限制日志中只显示前50个volumeIds
+		displayVolumeIds := volumeIds
+		if len(volumeIds) > 50 {
+			displayVolumeIds = volumeIds[:50]
+			glog.V(0).Infof("ec encode volumes: %v... (total %d volumes), concurrent number:%d, ec info:%d:%d \n", displayVolumeIds, len(volumeIds), maxProcessNum, erasure_coding.DataShardsCount, erasure_coding.ParityShardsCount)
+		} else {
+			glog.V(0).Infof("ec encode volumes: %v (total %d volumes), concurrent number:%d, ec info:%d:%d \n", volumeIds, len(volumeIds), maxProcessNum, erasure_coding.DataShardsCount, erasure_coding.ParityShardsCount)
+		}
+
 		processVolumeIds := volumeIds
 		if len(volumeIds) > maxProcessNum {
 			processVolumeIds = volumeIds[0:maxProcessNum]
@@ -418,7 +428,8 @@ func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, 
 	//allocatedEcIds, allocatedNodes := balancedEcDistribution2(allocatedDataNodes, volumeId)
 	allocatedEcIds, allocatedNodes := allocator.AllocatedEcIds, allocator.AllocatedNodes
 
-	glog.V(0).Infof("choose:%v, allocated nodes :%v, vid: %d", allocator.Choose, allocatedEcIds, volumeId)
+	glog.V(0).Infof("choose:%v, vid: %d, ec info：%d:%d", allocator.Choose, volumeId, erasure_coding.DataShardsCount, erasure_coding.ParityShardsCount)
+
 	err2 := operation.WithVolumeServerClient(false, sourceVolumeServer, commandEnv.option.GrpcDialOption, func(volumeServerClient volume_server_pb.VolumeServerClient) error {
 		_, genErr := volumeServerClient.VolumeEcShardsGenerate(context.Background(), &volume_server_pb.VolumeEcShardsGenerateRequest{
 			VolumeId:       uint32(volumeId),
