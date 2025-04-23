@@ -2,14 +2,17 @@ package shell
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
 	"github.com/seaweedfs/seaweedfs/weed/storage/super_block"
+	"github.com/seaweedfs/seaweedfs/weed/storage/types"
 )
 
 var (
@@ -32,6 +35,39 @@ func errorCheck(got error, want string) error {
 		return fmt.Errorf("expected error %q, got %q", want, got.Error())
 	}
 	return nil
+}
+
+func TestCollectCollectionsForVolumeIds(t *testing.T) {
+	testCases := []struct {
+		topology *master_pb.TopologyInfo
+		vids     []needle.VolumeId
+		want     []string
+	}{
+		// normal volumes
+		{topology1, nil, nil},
+		{topology1, []needle.VolumeId{}, nil},
+		{topology1, []needle.VolumeId{needle.VolumeId(9999)}, nil},
+		{topology1, []needle.VolumeId{needle.VolumeId(2)}, []string{""}},
+		{topology1, []needle.VolumeId{needle.VolumeId(2), needle.VolumeId(272)}, []string{"", "collection2"}},
+		{topology1, []needle.VolumeId{needle.VolumeId(2), needle.VolumeId(272), needle.VolumeId(299)}, []string{"", "collection2"}},
+		{topology1, []needle.VolumeId{needle.VolumeId(272), needle.VolumeId(299), needle.VolumeId(95)}, []string{"collection1", "collection2"}},
+		{topology1, []needle.VolumeId{needle.VolumeId(272), needle.VolumeId(299), needle.VolumeId(95), needle.VolumeId(51)}, []string{"collection1", "collection2"}},
+		{topology1, []needle.VolumeId{needle.VolumeId(272), needle.VolumeId(299), needle.VolumeId(95), needle.VolumeId(51), needle.VolumeId(15)}, []string{"collection0", "collection1", "collection2"}},
+		// EC volumes
+		{topology2, []needle.VolumeId{needle.VolumeId(9577)}, []string{"s3qldata"}},
+		{topology2, []needle.VolumeId{needle.VolumeId(9577), needle.VolumeId(12549)}, []string{"s3qldata"}},
+		// normal + EC volumes
+		{topology2, []needle.VolumeId{needle.VolumeId(18111)}, []string{"s3qldata"}},
+		{topology2, []needle.VolumeId{needle.VolumeId(8677)}, []string{"s3qldata"}},
+		{topology2, []needle.VolumeId{needle.VolumeId(18111), needle.VolumeId(8677)}, []string{"s3qldata"}},
+	}
+
+	for _, tc := range testCases {
+		got := collectCollectionsForVolumeIds(tc.topology, tc.vids)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("for %v: got %v, want %v", tc.vids, got, tc.want)
+		}
+	}
 }
 
 func TestParseReplicaPlacementArg(t *testing.T) {
@@ -105,8 +141,8 @@ func TestPickRackToBalanceShardsInto(t *testing.T) {
 		{topologyEc, "6241", "123", []string{"rack1", "rack2", "rack3", "rack4", "rack5", "rack6"}, ""},
 		{topologyEc, "6242", "123", []string{"rack1", "rack2", "rack3", "rack4", "rack5", "rack6"}, ""},
 		// EC volumes.
-		{topologyEc, "9577", "", nil, "shards 1 >= replica placement limit for other racks (0)"},
-		{topologyEc, "9577", "111", nil, "shards 1 >= replica placement limit for other racks (1)"},
+		{topologyEc, "9577", "", nil, "shards 1 > replica placement limit for other racks (0)"},
+		{topologyEc, "9577", "111", []string{"rack1", "rack2", "rack3"}, ""},
 		{topologyEc, "9577", "222", []string{"rack1", "rack2", "rack3"}, ""},
 		{topologyEc, "10457", "222", []string{"rack1"}, ""},
 		{topologyEc, "12737", "222", []string{"rack2"}, ""},
@@ -253,4 +289,92 @@ func Test_VolumeIdSort(t *testing.T) {
 	fmt.Println("after sort:", volumeIds)
 	//
 	ast.Equal(destVolumeIds, volumeIds)
+}
+func TestCountFreeShardSlots(t *testing.T) {
+	testCases := []struct {
+		name     string
+		topology *master_pb.TopologyInfo
+		diskType types.DiskType
+		want     map[string]int
+	}{
+		{
+			name:     "topology #1, free HDD shards",
+			topology: topology1,
+			diskType: types.HardDriveType,
+			want: map[string]int{
+				"192.168.1.1:8080": 17330,
+				"192.168.1.2:8080": 1540,
+				"192.168.1.4:8080": 1900,
+				"192.168.1.5:8080": 27010,
+				"192.168.1.6:8080": 17420,
+			},
+		},
+		{
+			name:     "topology #1, no free SSD shards available",
+			topology: topology1,
+			diskType: types.SsdType,
+			want: map[string]int{
+				"192.168.1.1:8080": 0,
+				"192.168.1.2:8080": 0,
+				"192.168.1.4:8080": 0,
+				"192.168.1.5:8080": 0,
+				"192.168.1.6:8080": 0,
+			},
+		},
+		{
+			name:     "topology #2, no negative free HDD shards",
+			topology: topology2,
+			diskType: types.HardDriveType,
+			want: map[string]int{
+				"172.19.0.3:8708":  0,
+				"172.19.0.4:8707":  8,
+				"172.19.0.5:8705":  58,
+				"172.19.0.6:8713":  39,
+				"172.19.0.8:8709":  8,
+				"172.19.0.9:8712":  0,
+				"172.19.0.10:8702": 0,
+				"172.19.0.13:8701": 0,
+				"172.19.0.14:8711": 0,
+				"172.19.0.16:8704": 89,
+				"172.19.0.17:8703": 0,
+				"172.19.0.19:8700": 9,
+				"172.19.0.20:8706": 0,
+				"172.19.0.21:8710": 9,
+			},
+		},
+		{
+			name:     "topology #2, no free SSD shards available",
+			topology: topology2,
+			diskType: types.SsdType,
+			want: map[string]int{
+				"172.19.0.10:8702": 0,
+				"172.19.0.13:8701": 0,
+				"172.19.0.14:8711": 0,
+				"172.19.0.16:8704": 0,
+				"172.19.0.17:8703": 0,
+				"172.19.0.19:8700": 0,
+				"172.19.0.20:8706": 0,
+				"172.19.0.21:8710": 0,
+				"172.19.0.3:8708":  0,
+				"172.19.0.4:8707":  0,
+				"172.19.0.5:8705":  0,
+				"172.19.0.6:8713":  0,
+				"172.19.0.8:8709":  0,
+				"172.19.0.9:8712":  0,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := map[string]int{}
+			eachDataNode(tc.topology, func(dc DataCenterId, rack RackId, dn *master_pb.DataNodeInfo) {
+				got[dn.Id] = countFreeShardSlots(dn, tc.diskType)
+			})
+
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

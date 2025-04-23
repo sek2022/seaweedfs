@@ -3,11 +3,12 @@ package s3api
 import (
 	"encoding/xml"
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/s3api/s3_constants"
-	"golang.org/x/exp/slices"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+
+	"github.com/seaweedfs/seaweedfs/weed/s3api/s3_constants"
 
 	"github.com/seaweedfs/seaweedfs/weed/filer"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/pb/filer_pb"
+	stats_collect "github.com/seaweedfs/seaweedfs/weed/stats"
 	"github.com/seaweedfs/seaweedfs/weed/util"
 )
 
@@ -30,10 +32,21 @@ func (s3a *S3ApiServer) DeleteObjectHandler(w http.ResponseWriter, r *http.Reque
 	target := util.FullPath(fmt.Sprintf("%s/%s%s", s3a.option.BucketsPath, bucket, object))
 	dir, name := target.DirAndName()
 
+	var auditLog *s3err.AccessLog
+
+	if s3err.Logger != nil {
+		auditLog = s3err.GetAccessLog(r, http.StatusNoContent, s3err.ErrNone)
+	}
+
 	err := s3a.WithFilerClient(false, func(client filer_pb.SeaweedFilerClient) error {
 
 		if err := doDeleteEntry(client, dir, name, true, false); err != nil {
 			return err
+		}
+
+		if auditLog != nil {
+			auditLog.Key = name
+			s3err.PostAccessLog(*auditLog)
 		}
 
 		if s3a.option.AllowEmptyFolder {
@@ -56,6 +69,8 @@ func (s3a *S3ApiServer) DeleteObjectHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	stats_collect.RecordBucketActiveTime(bucket)
+	stats_collect.S3DeletedObjectsCounter.WithLabelValues(bucket).Inc()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -157,6 +172,10 @@ func (s3a *S3ApiServer) DeleteMultipleObjectsHandler(w http.ResponseWriter, r *h
 			}
 		}
 
+		if s3a.option.AllowEmptyFolder {
+			return nil
+		}
+
 		// purge empty folders, only checking folders with deletions
 		for len(directoriesWithDeletion) > 0 {
 			directoriesWithDeletion = s3a.doDeleteEmptyDirectories(client, directoriesWithDeletion)
@@ -170,6 +189,8 @@ func (s3a *S3ApiServer) DeleteMultipleObjectsHandler(w http.ResponseWriter, r *h
 		deleteResp.DeletedObjects = deletedObjects
 	}
 	deleteResp.Errors = deleteErrors
+	stats_collect.RecordBucketActiveTime(bucket)
+	stats_collect.S3DeletedObjectsCounter.WithLabelValues(bucket).Add(float64(len(deletedObjects)))
 
 	writeSuccessResponseXML(w, r, deleteResp)
 

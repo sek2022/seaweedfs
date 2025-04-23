@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"hash"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -36,6 +37,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/s3api/s3err"
 )
 
@@ -56,10 +58,24 @@ const (
 	streamingContentSHA256 = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
 	signV4ChunkedAlgorithm = "AWS4-HMAC-SHA256-PAYLOAD"
 
-	// http Header "x-amz-content-sha256" == "UNSIGNED-PAYLOAD" indicates that the
+	// http Header "x-amz-content-sha256" == "UNSIGNED-PAYLOAD" or "STREAMING-UNSIGNED-PAYLOAD-TRAILER" indicates that the
 	// client did not calculate sha256 of the payload.
-	unsignedPayload = "UNSIGNED-PAYLOAD"
+	unsignedPayload          = "UNSIGNED-PAYLOAD"
+	streamingUnsignedPayload = "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
 )
+
+// AWS S3 authentication headers that should be skipped when signing the request
+// https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
+var awsS3AuthHeaders = map[string]struct{}{
+	"x-amz-content-sha256": {},
+	"x-amz-security-token": {},
+	"x-amz-algorithm":      {},
+	"x-amz-date":           {},
+	"x-amz-expires":        {},
+	"x-amz-signedheaders":  {},
+	"x-amz-credential":     {},
+	"x-amz-signature":      {},
+}
 
 // Returns SHA256 for calculating canonical-request.
 func getContentSha256Cksum(r *http.Request) string {
@@ -153,8 +169,9 @@ func (iam *IdentityAccessManagement) doesSignatureMatch(hashedPayload string, r 
 		// Trying with prefix before main path.
 
 		// Get canonical request.
-		canonicalRequest := getCanonicalRequest(extractedSignedHeaders, hashedPayload, queryStr, forwardedPrefix+req.URL.Path, req.Method)
+		glog.V(4).Infof("Forwarded Prefix: %s", forwardedPrefix)
 
+		canonicalRequest := getCanonicalRequest(extractedSignedHeaders, hashedPayload, queryStr, forwardedPrefix+req.URL.Path, req.Method)
 		errCode = iam.genAndCompareSignatureV4(canonicalRequest, cred.SecretKey, t, signV4Values)
 		if errCode == s3err.ErrNone {
 			return identity, errCode
@@ -176,7 +193,7 @@ func (iam *IdentityAccessManagement) doesSignatureMatch(hashedPayload string, r 
 func (iam *IdentityAccessManagement) genAndCompareSignatureV4(canonicalRequest, secretKey string, t time.Time, signV4Values signValues) s3err.ErrorCode {
 	// Get string to sign from canonical request.
 	stringToSign := getStringToSign(canonicalRequest, t, signV4Values.Credential.getScope())
-
+	glog.V(4).Infof("String to Sign:\n%s", stringToSign)
 	// Calculate signature.
 	newSignature := iam.getSignature(
 		secretKey,
@@ -185,6 +202,7 @@ func (iam *IdentityAccessManagement) genAndCompareSignatureV4(canonicalRequest, 
 		signV4Values.Credential.scope.service,
 		stringToSign,
 	)
+	glog.V(4).Infof("Signature:\n%s", newSignature)
 
 	// Verify if signature match.
 	if !compareSignatureV4(newSignature, signV4Values.Signature) {
@@ -423,15 +441,11 @@ func (iam *IdentityAccessManagement) doesPresignedSignatureMatch(hashedPayload s
 
 	// Save other headers available in the request parameters.
 	for k, v := range req.URL.Query() {
-
-		// Handle the metadata in presigned put query string
-		if strings.Contains(strings.ToLower(k), "x-amz-meta-") {
-			query.Set(k, v[0])
-		}
-
-		if strings.HasPrefix(strings.ToLower(k), "x-amz") {
+		// Skip AWS S3 authentication headers
+		if _, ok := awsS3AuthHeaders[strings.ToLower(k)]; ok {
 			continue
 		}
+
 		query[k] = v
 	}
 
@@ -683,12 +697,8 @@ func extractSignedHeaders(signedHeaders []string, r *http.Request) (http.Header,
 			// be sent, for the time being keep this work around.
 			extractedSignedHeaders.Set(header, "100-continue")
 		case "host":
-			// Go http server removes "host" from Request.Header
-			if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
-				extractedSignedHeaders.Set(header, forwardedHost)
-			} else {
-				extractedSignedHeaders.Set(header, r.Host)
-			}
+			extractedHost := extractHostHeader(r)
+			extractedSignedHeaders.Set(header, extractedHost)
 		case "transfer-encoding":
 			for _, enc := range r.TransferEncoding {
 				extractedSignedHeaders.Add(header, enc)
@@ -703,6 +713,53 @@ func extractSignedHeaders(signedHeaders []string, r *http.Request) (http.Header,
 		}
 	}
 	return extractedSignedHeaders, s3err.ErrNone
+}
+
+func extractHostHeader(r *http.Request) string {
+
+	forwardedHost := r.Header.Get("X-Forwarded-Host")
+	forwardedPort := r.Header.Get("X-Forwarded-Port")
+
+	// If X-Forwarded-Host is set, use that as the host.
+	// If X-Forwarded-Port is set, use that too to form the host.
+	if forwardedHost != "" {
+		extractedHost := forwardedHost
+		host, port, err := net.SplitHostPort(extractedHost)
+		if err == nil {
+			extractedHost = host
+			if forwardedPort == "" {
+				forwardedPort = port
+			}
+		}
+		if !isDefaultPort(r.URL.Scheme, forwardedPort) {
+			extractedHost = net.JoinHostPort(extractedHost, forwardedPort)
+		}
+		return extractedHost
+	} else {
+		// Go http server removes "host" from Request.Header
+		host := r.Host
+		if host == "" {
+			host = r.URL.Host
+		}
+		h, port, err := net.SplitHostPort(host)
+		if err != nil {
+			return host
+		}
+		if isDefaultPort(r.URL.Scheme, port) {
+			return h
+		}
+		return host
+	}
+}
+
+func isDefaultPort(scheme, port string) bool {
+	if port == "" {
+		return true
+	}
+
+	lowerCaseScheme := strings.ToLower(scheme)
+	return (lowerCaseScheme == "http" && port == "80") ||
+		(lowerCaseScheme == "https" && port == "443")
 }
 
 // getSignedHeaders generate a string i.e alphabetically sorted, semicolon-separated list of lowercase request header names
@@ -747,6 +804,8 @@ func getCanonicalRequest(extractedSignedHeaders http.Header, payload, queryStr, 
 		getSignedHeaders(extractedSignedHeaders),
 		payload,
 	}, "\n")
+
+	glog.V(4).Infof("Canonical Request:\n%s", canonicalRequest)
 	return canonicalRequest
 }
 

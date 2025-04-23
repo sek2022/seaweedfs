@@ -61,7 +61,7 @@ func RunMount(option *MountOptions, umask os.FileMode) bool {
 	// basic checks
 	chunkSizeLimitMB := *mountOptions.chunkSizeLimitMB
 	if chunkSizeLimitMB <= 0 {
-		fmt.Printf("Please specify a reasonable buffer size.")
+		fmt.Printf("Please specify a reasonable buffer size.\n")
 		return false
 	}
 
@@ -236,6 +236,7 @@ func RunMount(option *MountOptions, umask os.FileMode) bool {
 		CacheDirForRead:    *option.cacheDirForRead,
 		CacheSizeMBForRead: *option.cacheSizeMBForRead,
 		CacheDirForWrite:   cacheDirForWrite,
+		CacheMetaTTlSec:    *option.cacheMetaTtlSec,
 		DataCenter:         *option.dataCenter,
 		Quota:              int64(*option.collectionQuota) * 1024 * 1024,
 		MountUid:           uid,
@@ -282,6 +283,8 @@ func RunMount(option *MountOptions, umask os.FileMode) bool {
 	glog.V(0).Infof("This is SeaweedFS version %s %s %s", util.Version(), runtime.GOOS, runtime.GOARCH)
 
 	server.Serve()
+
+	seaweedFileSystem.ClearCacheDir()
 
 	return true
 }

@@ -1,12 +1,12 @@
 package stats
 
 import (
-	"log"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -23,9 +23,13 @@ const (
 	NoWriteOrDelete  = "noWriteOrDelete"
 	NoWriteCanDelete = "noWriteCanDelete"
 	IsDiskSpaceLow   = "isDiskSpaceLow"
+	bucketAtiveTTL   = 10 * time.Minute
 )
 
 var readOnlyVolumeTypes = [4]string{IsReadOnly, NoWriteOrDelete, NoWriteCanDelete, IsDiskSpaceLow}
+
+var bucketLastActiveTsNs map[string]int64 = map[string]int64{}
+var bucketLastActiveLock sync.Mutex
 
 var (
 	Gather = prometheus.NewRegistry()
@@ -281,6 +285,7 @@ var (
 			Name:      "request_total",
 			Help:      "Counter of s3 requests.",
 		}, []string{"type", "code", "bucket"})
+
 	S3HandlerCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -288,6 +293,7 @@ var (
 			Name:      "handler_total",
 			Help:      "Counter of s3 server handlers.",
 		}, []string{"type"})
+
 	S3RequestHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
@@ -296,6 +302,7 @@ var (
 			Help:      "Bucketed histogram of s3 request processing time.",
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 24),
 		}, []string{"type", "bucket"})
+
 	S3TimeToFirstByteHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
@@ -311,6 +318,38 @@ var (
 			Name:      "in_flight_requests",
 			Help:      "Current number of in-flight requests being handled by s3.",
 		}, []string{"type"})
+
+	S3BucketTrafficReceivedBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: "s3",
+			Name:      "bucket_traffic_received_bytes_total",
+			Help:      "Total number of bytes received by an S3 bucket from clients.",
+		}, []string{"bucket"})
+
+	S3BucketTrafficSentBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: "s3",
+			Name:      "bucket_traffic_sent_bytes_total",
+			Help:      "Total number of bytes sent from an S3 bucket to clients.",
+		}, []string{"bucket"})
+
+	S3DeletedObjectsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: "s3",
+			Name:      "deleted_objects",
+			Help:      "Number of objects deleted in each bucket.",
+		}, []string{"bucket"})
+
+	S3UploadedObjectsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: "s3",
+			Name:      "uploaded_objects",
+			Help:      "Number of objects uploaded in each bucket.",
+		}, []string{"bucket"})
 )
 
 func init() {
@@ -354,6 +393,12 @@ func init() {
 	Gather.MustRegister(S3RequestHistogram)
 	Gather.MustRegister(S3InFlightRequestsGauge)
 	Gather.MustRegister(S3TimeToFirstByteHistogram)
+	Gather.MustRegister(S3BucketTrafficReceivedBytesCounter)
+	Gather.MustRegister(S3BucketTrafficSentBytesCounter)
+	Gather.MustRegister(S3DeletedObjectsCounter)
+	Gather.MustRegister(S3UploadedObjectsCounter)
+
+	go bucketMetricTTLControl()
 }
 
 func LoopPushingMetric(name, instance, addr string, intervalSeconds int) {
@@ -390,7 +435,7 @@ func StartMetricsServer(ip string, port int) {
 		return
 	}
 	http.Handle("/metrics", promhttp.HandlerFor(Gather, promhttp.HandlerOpts{}))
-	log.Fatal(http.ListenAndServe(JoinHostPort(ip, port), nil))
+	glog.Fatal(http.ListenAndServe(JoinHostPort(ip, port), nil))
 }
 
 func SourceName(port uint32) string {
@@ -401,11 +446,48 @@ func SourceName(port uint32) string {
 	return net.JoinHostPort(hostname, strconv.Itoa(int(port)))
 }
 
-// todo - can be changed to DeletePartialMatch when https://github.com/prometheus/client_golang/pull/1013 gets released
+func RecordBucketActiveTime(bucket string) {
+	bucketLastActiveLock.Lock()
+	bucketLastActiveTsNs[bucket] = time.Now().UnixNano()
+	bucketLastActiveLock.Unlock()
+}
+
 func DeleteCollectionMetrics(collection string) {
-	VolumeServerDiskSizeGauge.DeleteLabelValues(collection, "normal")
-	for _, volume_type := range readOnlyVolumeTypes {
-		VolumeServerReadOnlyVolumeGauge.DeleteLabelValues(collection, volume_type)
+	labels := prometheus.Labels{"collection": collection}
+	c := MasterReplicaPlacementMismatch.DeletePartialMatch(labels)
+	c += MasterVolumeLayoutWritable.DeletePartialMatch(labels)
+	c += MasterVolumeLayoutCrowded.DeletePartialMatch(labels)
+	c += VolumeServerDiskSizeGauge.DeletePartialMatch(labels)
+	c += VolumeServerVolumeGauge.DeletePartialMatch(labels)
+	c += VolumeServerReadOnlyVolumeGauge.DeletePartialMatch(labels)
+
+	glog.V(0).Infof("delete collection metrics, %s: %d", collection, c)
+}
+
+func bucketMetricTTLControl() {
+	ttlNs := bucketAtiveTTL.Nanoseconds()
+	for {
+		now := time.Now().UnixNano()
+
+		bucketLastActiveLock.Lock()
+		for bucket, ts := range bucketLastActiveTsNs {
+			if (now - ts) > ttlNs {
+				delete(bucketLastActiveTsNs, bucket)
+
+				labels := prometheus.Labels{"bucket": bucket}
+				c := S3RequestCounter.DeletePartialMatch(labels)
+				c += S3RequestHistogram.DeletePartialMatch(labels)
+				c += S3TimeToFirstByteHistogram.DeletePartialMatch(labels)
+				c += S3BucketTrafficReceivedBytesCounter.DeletePartialMatch(labels)
+				c += S3BucketTrafficSentBytesCounter.DeletePartialMatch(labels)
+				c += S3DeletedObjectsCounter.DeletePartialMatch(labels)
+				c += S3UploadedObjectsCounter.DeletePartialMatch(labels)
+				glog.V(0).Infof("delete inactive bucket metrics, %s: %d", bucket, c)
+			}
+		}
+
+		bucketLastActiveLock.Unlock()
+		time.Sleep(bucketAtiveTTL)
 	}
-	VolumeServerVolumeGauge.DeleteLabelValues(collection, "volume")
+
 }

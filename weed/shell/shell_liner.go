@@ -8,12 +8,12 @@ import (
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
 	"github.com/seaweedfs/seaweedfs/weed/util"
 	"github.com/seaweedfs/seaweedfs/weed/util/grace"
-	"golang.org/x/exp/slices"
 	"io"
 	"math/rand"
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/peterh/liner"
@@ -154,6 +154,7 @@ func printHelp(cmds []string) {
 		for _, c := range Commands {
 			if strings.ToLower(c.Name()) == cmd {
 				fmt.Printf("  %s\t# %s\n", c.Name(), c.Help())
+				fmt.Printf("use \"%s -h\" for more details\n", c.Name())
 			}
 		}
 	}

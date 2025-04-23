@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/exp/slices"
+	"slices"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/operation"
@@ -63,6 +63,16 @@ func (fs *FilerServer) uploadReaderToChunks(reader io.Reader, startOffset int64,
 
 		// need to throttle used byte buffer
 		bytesBufferLimitChan <- struct{}{}
+
+		// As long as there is an error in the upload of one chunk, it can be terminated early
+		// uploadErr may be modified in other go routines, lock is needed to avoid race condition
+		uploadErrLock.Lock()
+		if uploadErr != nil {
+			<-bytesBufferLimitChan
+			uploadErrLock.Unlock()
+			break
+		}
+		uploadErrLock.Unlock()
 
 		bytesBuffer := bufPool.Get().(*bytes.Buffer)
 

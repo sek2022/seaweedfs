@@ -42,6 +42,7 @@ type Option struct {
 	CacheDirForRead    string
 	CacheSizeMBForRead int64
 	CacheDirForWrite   string
+	CacheMetaTTlSec    int
 	DataCenter         string
 	Umask              os.FileMode
 	Quota              int64
@@ -89,7 +90,7 @@ func NewSeaweedFileSystem(option *Option) *WFS {
 		RawFileSystem: fuse.NewDefaultRawFileSystem(),
 		option:        option,
 		signature:     util.RandomInt32(),
-		inodeToPath:   NewInodeToPath(util.FullPath(option.FilerMountRootPath)),
+		inodeToPath:   NewInodeToPath(util.FullPath(option.FilerMountRootPath), option.CacheMetaTTlSec),
 		fhMap:         NewFileHandleToInode(),
 		dhMap:         NewDirectoryHandleToInode(),
 		fhLockTable:   util.NewLockTable[FileHandleId](),
@@ -221,6 +222,12 @@ func (wfs *WFS) LookupFn() wdclient.LookupFileIdFunctionType {
 func (wfs *WFS) getCurrentFiler() pb.ServerAddress {
 	i := atomic.LoadInt32(&wfs.option.filerIndex)
 	return wfs.option.FilerAddresses[i]
+}
+
+func (wfs *WFS) ClearCacheDir() {
+	wfs.metaCache.Shutdown()
+	os.RemoveAll(wfs.option.getUniqueCacheDirForWrite())
+	os.RemoveAll(wfs.option.getUniqueCacheDirForRead())
 }
 
 func (option *Option) setupUniqueCacheDirectory() {

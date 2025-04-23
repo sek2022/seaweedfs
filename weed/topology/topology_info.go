@@ -2,11 +2,12 @@ package topology
 
 import (
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
-	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
-	"golang.org/x/exp/slices"
+	"slices"
 	"sort"
 	"strings"
+
+	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
+	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 )
 
 type TopologyInfo struct {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/seaweedfs/seaweedfs/weed/s3api/s3bucket"
+
 	"github.com/seaweedfs/seaweedfs/weed/cluster/lock_manager"
 
 	"github.com/seaweedfs/seaweedfs/weed/cluster"
@@ -247,7 +249,7 @@ func (f *Filer) ensureParentDirectoryEntry(ctx context.Context, entry *Entry, di
 	}
 
 	dirPath := "/" + util.Join(dirParts[:level]...)
-	// fmt.Printf("%d directory: %+v\n", i, dirPath)
+	// fmt.Printf("%d dirPath: %+v\n", level, dirPath)
 
 	// check the store directly
 	glog.V(4).Infof("find uncached directory: %s", dirPath)
@@ -255,6 +257,14 @@ func (f *Filer) ensureParentDirectoryEntry(ctx context.Context, entry *Entry, di
 
 	// no such existing directory
 	if dirEntry == nil {
+
+		// fmt.Printf("dirParts: %v %v %v\n", dirParts[0], dirParts[1], dirParts[2])
+		// dirParts[0] == "" and dirParts[1] == "buckets"
+		if len(dirParts) >= 3 && dirParts[1] == "buckets" {
+			if err := s3bucket.VerifyS3BucketName(dirParts[2]); err != nil {
+				return fmt.Errorf("invalid bucket name %s: %v", dirParts[2], err)
+			}
+		}
 
 		// ensure parent directory
 		if err = f.ensureParentDirectoryEntry(ctx, entry, dirParts, level-1, isFromOtherCluster); err != nil {
@@ -280,7 +290,7 @@ func (f *Filer) ensureParentDirectoryEntry(ctx context.Context, entry *Entry, di
 		glog.V(2).Infof("create directory: %s %v", dirPath, dirEntry.Mode)
 		mkdirErr := f.Store.InsertEntry(ctx, dirEntry)
 		if mkdirErr != nil {
-			if _, err := f.FindEntry(ctx, util.FullPath(dirPath)); err == filer_pb.ErrNotFound {
+			if fEntry, err := f.FindEntry(ctx, util.FullPath(dirPath)); err == filer_pb.ErrNotFound || fEntry == nil {
 				glog.V(3).Infof("mkdir %s: %v", dirPath, mkdirErr)
 				return fmt.Errorf("mkdir %s: %v", dirPath, mkdirErr)
 			}
