@@ -57,10 +57,14 @@ func (mc *MasterClient) GetLookupFileIdFunction() LookupFileIdFunctionType {
 }
 
 func (mc *MasterClient) LookupFileIdWithFallback(fileId string) (fullUrls []string, err error) {
-	fullUrls, err = mc.vidMap.LookupFileId(fileId)
+	fullUrls, err = mc.vidMap.LookupFileIdUrls(fileId)
+	//&& len(fullUrls) <= 2  tmp condition
 	if err == nil && len(fullUrls) > 0 {
 		return
 	}
+
+	//fmt.Println("-----999 LookupFileIdWithFallback:", fileId)
+	fullUrls = make([]string, 0)
 	err = pb.WithMasterClient(false, mc.GetMaster(context.Background()), mc.grpcDialOption, false, func(client master_pb.SeaweedClient) error {
 		resp, err := client.LookupVolume(context.Background(), &master_pb.LookupVolumeRequest{
 			VolumeOrFileIds: []string{fileId},
@@ -77,12 +81,51 @@ func (mc *MasterClient) LookupFileIdWithFallback(fileId string) (fullUrls []stri
 					DataCenter: vidLoc.DataCenter,
 				}
 				mc.vidMap.addLocation(uint32(vid), loc)
+				mc.vidMap.addFileLocation(fileId, loc)
 				httpUrl := "http://" + loc.Url + "/" + fileId
 				// Prefer same data center
 				if mc.DataCenter != "" && mc.DataCenter == loc.DataCenter {
 					fullUrls = append([]string{httpUrl}, fullUrls...)
 				} else {
 					fullUrls = append(fullUrls, httpUrl)
+				}
+			}
+		}
+		return nil
+	})
+	return
+}
+
+func (mc *MasterClient) LookupFileIdLocationsWithFallback(fileId string) (fileIdLocations []Location, err error) {
+	fileIdLocations, err = mc.vidMap.LookupFileIdLocations(fileId)
+	//fmt.Println("-----999 LookupFileIdLocationsWithFallback:", fileId)
+	if err == nil && len(fileIdLocations) > 0 {
+		return
+	}
+	fileIdLocations = make([]Location, 0)
+	err = pb.WithMasterClient(false, mc.GetMaster(context.Background()), mc.grpcDialOption, false, func(client master_pb.SeaweedClient) error {
+		resp, err := client.LookupVolume(context.Background(), &master_pb.LookupVolumeRequest{
+			VolumeOrFileIds: []string{fileId},
+		})
+		if err != nil {
+			return fmt.Errorf("LookupVolume %s failed: %v", fileId, err)
+		}
+		for vid, vidLocation := range resp.VolumeIdLocations {
+			for _, vidLoc := range vidLocation.Locations {
+				loc := Location{
+					Url:        vidLoc.Url,
+					PublicUrl:  vidLoc.PublicUrl,
+					GrpcPort:   int(vidLoc.GrpcPort),
+					DataCenter: vidLoc.DataCenter,
+				}
+				mc.vidMap.addLocation(uint32(vid), loc)
+				mc.vidMap.addFileLocation(fileId, loc)
+				//httpUrl := "http://" + loc.Url + "/" + fileId
+				// Prefer same data center
+				if mc.DataCenter != "" && mc.DataCenter == loc.DataCenter {
+					fileIdLocations = append([]Location{loc}, fileIdLocations...)
+				} else {
+					fileIdLocations = append(fileIdLocations, loc)
 				}
 			}
 		}

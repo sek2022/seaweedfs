@@ -3,12 +3,13 @@ package needle
 import (
 	"errors"
 	"fmt"
+	"io"
+
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/stats"
 	"github.com/seaweedfs/seaweedfs/weed/storage/backend"
 	. "github.com/seaweedfs/seaweedfs/weed/storage/types"
 	"github.com/seaweedfs/seaweedfs/weed/util"
-	"io"
 )
 
 const (
@@ -129,6 +130,7 @@ func (n *Needle) readNeedleDataVersion2(bytes []byte) (err error) {
 	_, err = n.readNeedleDataVersion2NonData(bytes[index:])
 	return
 }
+
 func (n *Needle) readNeedleDataVersion2NonData(bytes []byte) (index int, err error) {
 	lenBytes := len(bytes)
 	if index < lenBytes {
@@ -189,6 +191,10 @@ func (n *Needle) readNeedleDataVersion2NonData(bytes []byte) (index int, err err
 	return index, nil
 }
 
+func (n *Needle) ReadNeedleDataVersion2NonData(bytes []byte) (index int, err error) {
+	return n.readNeedleDataVersion2NonData(bytes)
+}
+
 func ReadNeedleHeader(r backend.BackendStorageFile, version Version, offset int64) (n *Needle, bytes []byte, bodyLength int64, err error) {
 	n = new(Needle)
 	if version == Version1 || version == Version2 || version == Version3 {
@@ -196,6 +202,9 @@ func ReadNeedleHeader(r backend.BackendStorageFile, version Version, offset int6
 
 		var count int
 		count, err = r.ReadAt(bytes, offset)
+		if err == io.EOF && count == NeedleHeaderSize {
+			err = nil
+		}
 		if count <= 0 || err != nil {
 			return nil, bytes, 0, err
 		}
@@ -230,7 +239,12 @@ func (n *Needle) ReadNeedleBody(r backend.BackendStorageFile, version Version, o
 		return nil, nil
 	}
 	bytes = make([]byte, bodyLength)
-	if _, err = r.ReadAt(bytes, offset); err != nil {
+	readCount, err := r.ReadAt(bytes, offset)
+	if err == io.EOF && int64(readCount) == bodyLength {
+		err = nil
+	}
+	if err != nil {
+		glog.Errorf("%s read %d bodyLength %d offset %d: %v", r.Name(), readCount, bodyLength, offset, err)
 		return
 	}
 

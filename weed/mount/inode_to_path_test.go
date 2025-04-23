@@ -91,3 +91,7 @@ func TestInodeEntry_removeOnePath(t *testing.T) {
 		})
 	}
 }
+
+func TestSeek(t *testing.T) {
+
+}

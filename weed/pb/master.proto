@@ -53,6 +53,8 @@ service Seaweed {
   }
   rpc VolumeGrow (VolumeGrowRequest) returns (VolumeGrowResponse) {
   }
+  rpc VolumeServerECoding (VolumeServerECodingRequest) returns (VolumeServerECodingResponse) {
+  }
 }
 
 //////////////////////////////////////////////////
@@ -437,4 +439,12 @@ message RaftListClusterServersResponse {
 }
 
 message VolumeGrowResponse {
+}
+
+message VolumeServerECodingRequest {
+  string ip = 1;
+  uint32 port = 2;
+  bool is_erasure_coding = 3;
+}
+message VolumeServerECodingResponse {
 }

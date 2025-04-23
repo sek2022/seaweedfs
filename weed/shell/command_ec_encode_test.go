@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestEcDistribution(t *testing.T) {
+func TestEcDistribution3(t *testing.T) {
 
 	topologyInfo := parseOutput(topoData)
 
@@ -197,15 +197,11 @@ func chooseMasterServerForVolumesTest(volumeIds []needle.VolumeId) (map[needle.V
 	return maxVolumeChooseLocationMap, remainVolumeIds
 }
 
-func TestGetCombinations(t *testing.T) {
-	var result [][]int
-	arr := []int{222, 223, 224, 225, 226, 227}
-	permute(arr, len(arr), &result)
-
-	fmt.Printf("result:%v \n", result)
-}
-
 func TestSyscall(t *testing.T) {
 	//err := syscall.Fallocate(int(file.Fd()), FallocFlPunchHole, offset, length)
 	//syscall.Fall
+}
+
+func Test222(t *testing.T) {
+	fmt.Println(2 % 3)
 }

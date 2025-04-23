@@ -3,10 +3,11 @@ package storage
 import (
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
 	"github.com/seaweedfs/seaweedfs/weed/storage/super_block"
@@ -86,7 +87,7 @@ func TestDestroyEmptyVolumeWithOnlyEmpty(t *testing.T) {
 
 	// should can Destroy empty volume with onlyEmpty
 	assertFileExist(t, true, path)
-	err = v.Destroy(true)
+	err = v.Destroy(true, false)
 	if err != nil {
 		t.Fatalf("destroy volume: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestDestroyEmptyVolumeWithoutOnlyEmpty(t *testing.T) {
 
 	// should can Destroy empty volume without onlyEmpty
 	assertFileExist(t, true, path)
-	err = v.Destroy(false)
+	err = v.Destroy(false, false)
 	if err != nil {
 		t.Fatalf("destroy volume: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestDestroyNonemptyVolumeWithOnlyEmpty(t *testing.T) {
 	assert.Equal(t, uint64(1), v.FileCount())
 
 	assertFileExist(t, true, path)
-	err = v.Destroy(true)
+	err = v.Destroy(true, false)
 	assert.EqualError(t, err, "volume not empty")
 	assertFileExist(t, true, path)
 
@@ -158,7 +159,7 @@ func TestDestroyNonemptyVolumeWithoutOnlyEmpty(t *testing.T) {
 	assert.Equal(t, uint64(1), v.FileCount())
 
 	assertFileExist(t, true, path)
-	err = v.Destroy(false)
+	err = v.Destroy(false, false)
 	if err != nil {
 		t.Fatalf("destroy volume: %v", err)
 	}

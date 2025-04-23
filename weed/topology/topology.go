@@ -55,6 +55,8 @@ type Topology struct {
 
 	UuidAccessLock sync.RWMutex
 	UuidMap        map[string][]string
+
+	LastLeaderChangeTime time.Time
 }
 
 func NewTopology(id string, seq sequence.Sequencer, volumeSizeLimit uint64, pulse int, replicationAsMin bool) *Topology {
@@ -194,17 +196,17 @@ func (t *Topology) MaybeLeader() (l pb.ServerAddress, err error) {
 	return
 }
 
-func (t *Topology) Lookup(collection string, vid needle.VolumeId) (dataNodes []*DataNode) {
+func (t *Topology) Lookup(collection string, vid needle.VolumeId) (dataNodes []*DataNode, ec bool) {
 	// maybe an issue if lots of collections?
 	if collection == "" {
 		for _, c := range t.collectionMap.Items() {
 			if list := c.(*Collection).Lookup(vid); list != nil {
-				return list
+				return list, false
 			}
 		}
 	} else {
 		if c, ok := t.collectionMap.Find(collection); ok {
-			return c.(*Collection).Lookup(vid)
+			return c.(*Collection).Lookup(vid), false
 		}
 	}
 
@@ -212,10 +214,10 @@ func (t *Topology) Lookup(collection string, vid needle.VolumeId) (dataNodes []*
 		for _, loc := range locations.Locations {
 			dataNodes = append(dataNodes, loc...)
 		}
-		return dataNodes
+		return dataNodes, true
 	}
 
-	return nil
+	return nil, false
 }
 
 func (t *Topology) NextVolumeId() (needle.VolumeId, error) {
@@ -252,7 +254,7 @@ func (t *Topology) PickForWrite(requestedCount uint64, option *VolumeGrowOption,
 		return "", 0, nil, shouldGrow, fmt.Errorf("failed to find writable volumes for collection:%s replication:%s ttl:%s error: %v", option.Collection, option.ReplicaPlacement.String(), option.Ttl.String(), err)
 	}
 	if volumeLocationList == nil || volumeLocationList.Length() == 0 {
-		return "", 0, nil, shouldGrow, fmt.Errorf("%s available for collection:%s replication:%s ttl:%s", noWritableVolumes, option.Collection, option.ReplicaPlacement.String(), option.Ttl.String())
+		return "", 0, nil, shouldGrow, fmt.Errorf("%s available for collection:%s replication:%s ttl:%s", NoWritableVolumes, option.Collection, option.ReplicaPlacement.String(), option.Ttl.String())
 	}
 	nextFileId := t.Sequence.NextFileId(requestedCount)
 	fileId = needle.NewFileId(vid, nextFileId, rand.Uint32()).String()
@@ -367,6 +369,19 @@ func (t *Topology) ListDataCenters() (dcs []string) {
 	return dcs
 }
 
+func (t *Topology) ListDCAndRacks() (dcs map[NodeId][]NodeId) {
+	t.RLock()
+	defer t.RUnlock()
+	dcs = make(map[NodeId][]NodeId)
+	for _, dcNode := range t.children {
+		dcNodeId := dcNode.(*DataCenter).Id()
+		for _, rackNode := range dcNode.Children() {
+			dcs[dcNodeId] = append(dcs[dcNodeId], rackNode.(*Rack).Id())
+		}
+	}
+	return dcs
+}
+
 func (t *Topology) SyncDataNodeRegistration(volumes []*master_pb.VolumeInformationMessage, dn *DataNode) (newVolumes, deletedVolumes []storage.VolumeInfo) {
 	// convert into in memory struct storage.VolumeInfo
 	var volumeInfos []storage.VolumeInfo
@@ -443,4 +458,14 @@ func (t *Topology) DisableVacuum() {
 func (t *Topology) EnableVacuum() {
 	glog.V(0).Infof("EnableVacuum")
 	t.isDisableVacuum = false
+}
+
+func (t *Topology) GetDataNode(ip string, port int) *DataNode {
+	// maybe an issue if lots of collections?
+	for _, c := range t.collectionMap.Items() {
+		if dn := c.(*Collection).GetDataNodeByIpAndPort(ip, port); dn != nil {
+			return dn
+		}
+	}
+	return nil
 }

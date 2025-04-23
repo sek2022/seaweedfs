@@ -291,7 +291,8 @@ func (n *NodeImpl) CollectDeadNodeAndFullVolumes(freshThreshHoldUnixTime int64, 
 				}
 				copyCount := v.ReplicaPlacement.GetCopyCount()
 				if copyCount > 1 {
-					if copyCount > len(topo.Lookup(v.Collection, v.Id)) {
+					dataNodes, _ := topo.Lookup(v.Collection, v.Id)
+					if copyCount > len(dataNodes) {
 						stats.MasterReplicaPlacementMismatch.WithLabelValues(v.Collection, v.Id.String()).Set(1)
 					} else {
 						stats.MasterReplicaPlacementMismatch.WithLabelValues(v.Collection, v.Id.String()).Set(0)

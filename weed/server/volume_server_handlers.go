@@ -15,6 +15,8 @@ import (
 	"github.com/seaweedfs/seaweedfs/weed/stats"
 )
 
+const MaxWaitUploadDataSize = 500 * 1024 * 1024 //500M
+
 /*
 
 If volume server is started with a separated public port, the public port will
@@ -75,6 +77,21 @@ func (vs *VolumeServer) privateStoreHandler(w http.ResponseWriter, r *http.Reque
 		contentLength := getContentLength(r)
 		// exclude the replication from the concurrentUploadLimitMB
 		if r.URL.Query().Get("type") != "replicate" && vs.concurrentUploadLimit != 0 {
+
+			// inWaitUploadDataSize := atomic.LoadInt64(&vs.inWaitUploadDataSize)
+			// //防止内存溢出,上传等待不能超过MaxWaitUploadDataSize
+			// if inWaitUploadDataSize > MaxWaitUploadDataSize {
+			// 	err := fmt.Errorf("inWaitUploadDataSize too many:%d", inWaitUploadDataSize)
+			// 	glog.V(0).Infof("too many requests: %v", err)
+			// 	writeJsonError(w, r, http.StatusTooManyRequests, err)
+			// 	return
+			// }
+
+			// atomic.AddInt64(&vs.inWaitUploadDataSize, contentLength)
+			// defer func() {
+			// 	atomic.AddInt64(&vs.inWaitUploadDataSize, -contentLength)
+			// }()
+
 			startTime := time.Now()
 			vs.inFlightUploadDataLimitCond.L.Lock()
 			inFlightUploadDataSize := atomic.LoadInt64(&vs.inFlightUploadDataSize)
@@ -83,11 +100,11 @@ func (vs *VolumeServer) privateStoreHandler(w http.ResponseWriter, r *http.Reque
 				if startTime.Add(vs.inflightUploadDataTimeout).Before(time.Now()) {
 					vs.inFlightUploadDataLimitCond.L.Unlock()
 					err := fmt.Errorf("reject because inflight upload data %d > %d, and wait timeout", inFlightUploadDataSize, vs.concurrentUploadLimit)
-					glog.V(1).Infof("too many requests: %v", err)
+					glog.V(0).Infof("too many requests: %v", err)
 					writeJsonError(w, r, http.StatusTooManyRequests, err)
 					return
 				}
-				glog.V(4).Infof("wait because inflight upload data %d > %d", inFlightUploadDataSize, vs.concurrentUploadLimit)
+				glog.V(0).Infof("wait because inflight upload data %d > %d", inFlightUploadDataSize, vs.concurrentUploadLimit)
 				vs.inFlightUploadDataLimitCond.Wait()
 				inFlightUploadDataSize = atomic.LoadInt64(&vs.inFlightUploadDataSize)
 			}

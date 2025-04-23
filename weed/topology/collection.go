@@ -98,3 +98,18 @@ func (c *Collection) ListVolumeServers() (nodes []*DataNode) {
 	}
 	return
 }
+
+func (c *Collection) GetDataNodeByIpAndPort(ip string, port int) *DataNode {
+	for _, vl := range c.storageType2VolumeLayout.Items() {
+		if vl != nil {
+			if list := vl.(*VolumeLayout).ListVolumeServers(); list != nil {
+				for _, dn := range list {
+					if dn.Ip == ip && dn.Port == port {
+						return dn
+					}
+				}
+			}
+		}
+	}
+	return nil
+}

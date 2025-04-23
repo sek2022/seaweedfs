@@ -2,11 +2,12 @@ package erasure_coding
 
 import (
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
-	"github.com/seaweedfs/seaweedfs/weed/storage/volume_info"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
+	"github.com/seaweedfs/seaweedfs/weed/storage/volume_info"
 
 	"github.com/klauspost/reedsolomon"
 
@@ -26,7 +27,20 @@ const (
 	LargestBufferSize           = 8 * 1024 * 1024 // 8MB
 	MediumBufferSize            = 1024 * 1024     // 1MB
 	SmallBufferSize             = 256 * 1024
+	//DiskReadLimit               = 100 //100M/s
 )
+
+//var (
+//	diskReadLimiter *rate.Limiter
+//)
+//
+//// SetDiskReadLimitMB 设置磁盘读取速率限制 (MB/s)
+//func SetDiskReadLimitMB(limitMB int) {
+//	if limitMB > 0 {
+//		// 创建一个新的限速器，burst 设置为 1MB
+//		diskReadLimiter = rate.NewLimiter(rate.Limit(limitMB*1024*1024), 1024*1024)
+//	}
+//}
 
 // UploadSortedFileFromIdx generates .ecx file from existing .idx file
 // all keys are sorted in ascending order
@@ -216,7 +230,9 @@ func closeEcFiles(files []*os.File) {
 }
 
 func encodeDataOneBatch(file *os.File, enc reedsolomon.Encoder, startOffset, blockSize int64, buffers [][]byte, clients map[uint32]volume_info.UploadFileClient, collection string, volumeId uint32) error {
-
+	//if diskReadLimiter == nil {
+	//	SetDiskReadLimitMB(DiskReadLimit)
+	//}
 	// read data into buffers
 	for i := 0; i < DataShardsCount; i++ {
 		n, err := file.ReadAt(buffers[i], startOffset+blockSize*int64(i))
@@ -230,6 +246,13 @@ func encodeDataOneBatch(file *os.File, enc reedsolomon.Encoder, startOffset, blo
 				buffers[i][t] = 0
 			}
 		}
+
+		// 在读取完成后进行限速，即使限速失败也继续执行
+		//if diskReadLimiter != nil {
+		//	if err = diskReadLimiter.WaitN(context.Background(), n); err != nil {
+		//		glog.V(0).Infof("rate limit wait: %v", err)
+		//	}
+		//}
 	}
 
 	err := enc.Encode(buffers)

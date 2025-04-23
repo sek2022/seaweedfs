@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/karlseguin/ccache/v2"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/volume_info"
 	"github.com/seaweedfs/seaweedfs/weed/util"
@@ -49,6 +50,11 @@ type ReadOption struct {
 	// increasing ReadBufferSize can reduce the number of get locks times and shorten read P99 latency.
 	// but will increase memory usage a bit. Use with hasSlowRead normally.
 	ReadBufferSize int
+	// 新增字段用于支持部分读取
+	Offset   int64 // 读取的起始位置
+	Size     int64 // 需要读取的数据大小
+	ReadPart bool  // 部分读取
+	Ec       bool
 }
 
 /*
@@ -73,6 +79,23 @@ type Store struct {
 	NewEcShardsChan     chan master_pb.VolumeEcShardInformationMessage
 	DeletedEcShardsChan chan master_pb.VolumeEcShardInformationMessage
 	isStopping          bool
+	ecReadCache         *EcReadCache
+}
+
+type EcReadCache struct {
+	cache    *ccache.Cache
+	pageSize int64
+}
+
+func NewEcReadCache() *EcReadCache {
+	return &EcReadCache{
+		cache: ccache.New(ccache.Configure().
+			MaxSize(100).      // 缓存2000个块
+			ItemsToPrune(10).  // 每次清理500条
+			GetsPerPromote(3). // 访问3次后提升
+			Buckets(256)),     // 使用512个bucket
+		pageSize: 256 * 1024, // 256KB per page
+	}
 }
 
 func (s *Store) String() (str string) {
@@ -104,7 +127,7 @@ func NewStore(grpcDialOption grpc.DialOption, ip string, port int, grpcPort int,
 
 	s.NewEcShardsChan = make(chan master_pb.VolumeEcShardInformationMessage, 3)
 	s.DeletedEcShardsChan = make(chan master_pb.VolumeEcShardInformationMessage, 3)
-
+	s.ecReadCache = NewEcReadCache()
 	return
 }
 func (s *Store) AddVolume(volumeId needle.VolumeId, collection string, needleMapKind NeedleMapKind, replicaPlacement string, ttlString string, preallocate int64, MemoryMapMaxSizeMb uint32, diskType DiskType, ldbTimeout int64) error {
@@ -385,19 +408,32 @@ func (s *Store) CollectHeartbeat() *master_pb.Heartbeat {
 
 func (s *Store) deleteExpiredEcVolumes() (ecShards, deleted []*master_pb.VolumeEcShardInformationMessage) {
 	for _, location := range s.Locations {
+		// Collect ecVolume to be deleted
+		var toDeleteEvs []*erasure_coding.EcVolume
+		location.ecVolumesLock.RLock()
 		for _, ev := range location.ecVolumes {
-			messages := ev.ToVolumeEcShardInformationMessage()
 			if ev.IsTimeToDestroy() {
-				err := location.deleteEcVolumeById(ev.VolumeId)
-				if err != nil {
-					ecShards = append(ecShards, messages...)
-					glog.Errorf("delete EcVolume err %d: %v", ev.VolumeId, err)
-					continue
-				}
-				deleted = append(deleted, messages...)
+				toDeleteEvs = append(toDeleteEvs, ev)
 			} else {
+				messages := ev.ToVolumeEcShardInformationMessage()
 				ecShards = append(ecShards, messages...)
 			}
+		}
+		location.ecVolumesLock.RUnlock()
+
+		// Delete expired volumes
+		for _, ev := range toDeleteEvs {
+			messages := ev.ToVolumeEcShardInformationMessage()
+			// deleteEcVolumeById has its own lock
+			err := location.deleteEcVolumeById(ev.VolumeId)
+			if err != nil {
+				ecShards = append(ecShards, messages...)
+				glog.Errorf("delete EcVolume err %d: %v", ev.VolumeId, err)
+				continue
+			}
+			// No need for additional lock here since we only need the messages
+			// from volumes that were already collected
+			deleted = append(deleted, messages...)
 		}
 	}
 	return
@@ -571,6 +607,7 @@ func (s *Store) DeleteVolume(i needle.VolumeId, onlyEmpty bool, afterEc bool) er
 			collectionVolumeSize[v.Collection] = 0
 			glog.V(0).Infof("DeleteVolume %d", i)
 			//statics after delete volume
+			location.volumesLock.RLock()
 			for _, sv := range location.volumes {
 				_, volumeMessage := sv.ToVolumeInformationMessage()
 				if volumeMessage == nil {
@@ -581,6 +618,7 @@ func (s *Store) DeleteVolume(i needle.VolumeId, onlyEmpty bool, afterEc bool) er
 				}
 				collectionVolumeSize[sv.Collection] += int64(volumeMessage.Size)
 			}
+			location.volumesLock.RUnlock()
 
 			if collectionVolumeSize[v.Collection] == 0 { //If location.volumes change to empty after delete, Must notice to (VolumeServerDiskSizeGauge), Otherwise monitor will display error
 				stats.VolumeServerDiskSizeGauge.WithLabelValues(v.Collection, "normal").Set(float64(0))

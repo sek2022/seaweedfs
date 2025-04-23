@@ -2,10 +2,12 @@ package erasure_coding
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/seaweedfs/seaweedfs/weed/stats"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
@@ -15,13 +17,14 @@ import (
 type ShardId uint8
 
 type EcVolumeShard struct {
-	VolumeId    needle.VolumeId
-	ShardId     ShardId
-	Collection  string
-	dir         string
-	ecdFile     *os.File
-	ecdFileSize int64
-	DiskType    types.DiskType
+	VolumeId           needle.VolumeId
+	ShardId            ShardId
+	Collection         string
+	dir                string
+	ecdFile            *os.File
+	ecdFileSize        int64
+	DiskType           types.DiskType
+	DataFileAccessLock sync.RWMutex
 }
 
 func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string, id needle.VolumeId, shardId ShardId) (v *EcVolumeShard, e error) {
@@ -45,7 +48,6 @@ func NewEcVolumeShard(diskType types.DiskType, dirname string, collection string
 	v.ecdFileSize = ecdFi.Size()
 
 	stats.VolumeServerVolumeGauge.WithLabelValues(v.Collection, "ec_shards").Inc()
-
 	return
 }
 
@@ -93,6 +95,10 @@ func (shard *EcVolumeShard) Destroy() {
 
 func (shard *EcVolumeShard) ReadAt(buf []byte, offset int64) (int, error) {
 
-	return shard.ecdFile.ReadAt(buf, offset)
+	n, err := shard.ecdFile.ReadAt(buf, offset)
+	if err == io.EOF && n == len(buf) {
+		err = nil
+	}
+	return n, err
 
 }

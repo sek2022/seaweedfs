@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/stats"
+	"strings"
 	"time"
 
 	"github.com/seaweedfs/raft"
@@ -84,9 +85,12 @@ func (ms *MasterServer) Assign(ctx context.Context, req *master_pb.AssignRequest
 	)
 
 	for time.Now().Sub(startTime) < maxTimeout {
+		//glog.V(0).Infof("assign err, req: %v option: %v", req, option.String())
+
 		fid, count, dnList, shouldGrow, err := ms.Topo.PickForWrite(req.Count, option, vl)
 		if shouldGrow && !vl.HasGrowRequest() {
 			if err != nil && ms.Topo.AvailableSpaceFor(option) <= 0 {
+				glog.V(0).Infof("assign err, req: %v option: %v, err: %v", req, option.String(), err)
 				err = fmt.Errorf("%s and no free volumes left for %s", err.Error(), option.String())
 			}
 			vl.AddGrowRequest()
@@ -100,6 +104,9 @@ func (ms *MasterServer) Assign(ctx context.Context, req *master_pb.AssignRequest
 			glog.V(1).Infof("assign %v %v: %v", req, option.String(), err)
 			stats.MasterPickForWriteErrorCounter.Inc()
 			lastErr = err
+			if (req.DataCenter != "" || req.Rack != "") && strings.Contains(err.Error(), topology.NoWritableVolumes) {
+				break
+			}
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}

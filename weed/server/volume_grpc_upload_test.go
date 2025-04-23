@@ -28,3 +28,14 @@ func TestVolumeServer_UploadFile(t *testing.T) {
 	file.WriteString("11122233")
 
 }
+
+func TestDecompress(t *testing.T) {
+	data := []byte{31, 139, 163, 86, 159, 88, 126, 96}
+	var err error
+	if data, err = util.DecompressData(data); err != nil {
+		fmt.Println("uncompress error:", err)
+		return
+	}
+
+	fmt.Println(data)
+}

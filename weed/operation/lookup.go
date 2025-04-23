@@ -18,6 +18,7 @@ type Location struct {
 	PublicUrl  string `json:"publicUrl,omitempty"`
 	DataCenter string `json:"dataCenter,omitempty"`
 	GrpcPort   int    `json:"grpcPort,omitempty"`
+	Coding     bool   `json:"coding,omitempty"`
 }
 
 func (l *Location) ServerAddress() pb.ServerAddress {

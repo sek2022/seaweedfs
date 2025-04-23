@@ -1,6 +1,7 @@
 package weed_server
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -9,9 +10,13 @@ import (
 
 	ui "github.com/seaweedfs/seaweedfs/weed/server/master_ui"
 	"github.com/seaweedfs/seaweedfs/weed/stats"
+	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/util"
 )
 
+func (ms *MasterServer) Version() string {
+	return fmt.Sprintf("%s ec:%d:%d", util.Version(), erasure_coding.DataShardsCount, erasure_coding.ParityShardsCount)
+}
 func (ms *MasterServer) uiStatusHandler(w http.ResponseWriter, r *http.Request) {
 	infos := make(map[string]interface{})
 	infos["Up Time"] = time.Now().Sub(startTime).String()
@@ -29,7 +34,7 @@ func (ms *MasterServer) uiStatusHandler(w http.ResponseWriter, r *http.Request) 
 			Counters          *stats.ServerStats
 			VolumeSizeLimitMB uint32
 		}{
-			util.Version(),
+			ms.Version(),
 			ms.Topo.ToInfo(),
 			ms.Topo.RaftServer,
 			infos,
@@ -46,7 +51,7 @@ func (ms *MasterServer) uiStatusHandler(w http.ResponseWriter, r *http.Request) 
 			Counters          *stats.ServerStats
 			VolumeSizeLimitMB uint32
 		}{
-			util.Version(),
+			ms.Version(),
 			ms.Topo.ToInfo(),
 			ms.Topo.HashicorpRaft,
 			infos,

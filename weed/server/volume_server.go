@@ -32,6 +32,7 @@ type VolumeServer struct {
 	readBufferSizeMB              int
 
 	SeedMasterNodes []pb.ServerAddress
+	whiteList       []string
 	currentMaster   pb.ServerAddress
 	pulseSeconds    int
 	dataCenter      string
@@ -50,6 +51,7 @@ type VolumeServer struct {
 	fileSizeLimitBytes      int64
 	isHeartbeating          bool
 	stopChan                chan bool
+	isECoding               bool
 }
 
 func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
@@ -102,7 +104,10 @@ func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
 		hasSlowRead:                   hasSlowRead,
 		readBufferSizeMB:              readBufferSizeMB,
 		ldbTimout:                     ldbTimeout,
+		whiteList:                     whiteList,
 	}
+
+	whiteList = append(whiteList, util.StringSplit(v.GetString("guard.white_list"), ",")...)
 	vs.SeedMasterNodes = masterNodes
 
 	vs.checkWithMaster()
@@ -149,4 +154,12 @@ func (vs *VolumeServer) Shutdown() {
 	glog.V(0).Infoln("Shutting down volume server...")
 	vs.store.Close()
 	glog.V(0).Infoln("Shut down successfully!")
+}
+
+func (vs *VolumeServer) Reload() {
+	glog.V(0).Infoln("Reload volume server...")
+
+	util.LoadConfiguration("security", false)
+	v := util.GetViper()
+	vs.guard.UpdateWhiteList(append(vs.whiteList, util.StringSplit(v.GetString("guard.white_list"), ",")...))
 }

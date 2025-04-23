@@ -356,3 +356,22 @@ func (vs *VolumeServer) Ping(ctx context.Context, req *volume_server_pb.PingRequ
 	resp.StopTimeNs = time.Now().UnixNano()
 	return
 }
+
+// notify master volume server is coding
+func (vs *VolumeServer) notifyMasterVolumeServerECoding(coding bool) error {
+	if grpcErr := pb.WithMasterClient(false, vs.GetMaster(context.Background()), vs.grpcDialOption, false, func(client master_pb.SeaweedClient) error {
+		_, err := client.VolumeServerECoding(context.Background(), &master_pb.VolumeServerECodingRequest{
+			Ip:              vs.store.Ip,
+			Port:            uint32(vs.store.Port),
+			IsErasureCoding: coding,
+		})
+		if err != nil {
+			return fmt.Errorf("set volume server to coding on master: %v", err)
+		}
+		return nil
+	}); grpcErr != nil {
+		glog.V(0).Infof("connect to %s: %v", vs.GetMaster(context.Background()), grpcErr)
+		return fmt.Errorf("grpc VolumeECoding with master %s: %v", vs.GetMaster(context.Background()), grpcErr)
+	}
+	return nil
+}

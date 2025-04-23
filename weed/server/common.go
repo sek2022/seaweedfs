@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/seaweedfs/seaweedfs/weed/storage"
+
 	"github.com/seaweedfs/seaweedfs/weed/filer"
 	"github.com/seaweedfs/seaweedfs/weed/s3api/s3_constants"
 
@@ -289,7 +291,12 @@ func adjustHeaderContentDisposition(w http.ResponseWriter, r *http.Request, file
 	}
 }
 
-func ProcessRangeRequest(r *http.Request, w http.ResponseWriter, totalSize int64, mimeType string, prepareWriteFn func(offset int64, size int64) (filer.DoStreamContent, error)) error {
+func ProcessRangeRequest(r *http.Request, w http.ResponseWriter, totalSize int64, mimeType string, readOption *storage.ReadOption, prepareWriteFn func(offset int64, size int64) (filer.DoStreamContent, error)) error {
+	var ecReadPart = false
+	if readOption != nil && readOption.ReadPart && readOption.Ec {
+		ecReadPart = true
+	}
+
 	rangeReq := r.Header.Get("Range")
 	bufferedWriter := writePool.Get().(*bufio.Writer)
 	bufferedWriter.Reset(w)
@@ -318,7 +325,14 @@ func ProcessRangeRequest(r *http.Request, w http.ResponseWriter, totalSize int64
 
 	//the rest is dealing with partial content request
 	//mostly copy from src/pkg/net/http/fs.go
-	ranges, err := parseRange(rangeReq, totalSize)
+	var ranges []httpRange
+	var err error
+	if ecReadPart {
+		ranges, err = parseRangeHeader(rangeReq)
+	} else {
+		ranges, err = parseRange(rangeReq, totalSize)
+	}
+
 	if err != nil {
 		glog.Errorf("ProcessRangeRequest headers: %+v err: %v", w.Header(), err)
 		http.Error(w, err.Error(), http.StatusRequestedRangeNotSatisfiable)
@@ -349,6 +363,10 @@ func ProcessRangeRequest(r *http.Request, w http.ResponseWriter, totalSize int64
 		ra := ranges[0]
 		w.Header().Set("Content-Length", strconv.FormatInt(ra.length, 10))
 		w.Header().Set("Content-Range", ra.contentRange(totalSize))
+		if ecReadPart {
+			ra.start = 0
+		}
+		//glog.V(0).Infof("------ra.start: %d, ra.length: %d, rangeReq: %s, totalSize:%d", ra.start, ra.length, rangeReq, totalSize)
 
 		writeFn, err := prepareWriteFn(ra.start, ra.length)
 		if err != nil {

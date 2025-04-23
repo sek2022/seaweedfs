@@ -4,13 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"google.golang.org/grpc"
 	"io"
 	"math/rand"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/operation"
@@ -63,7 +64,7 @@ func (c *commandEcEncode) HasTag(CommandTag) bool {
 func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Writer) (err error) {
 
 	encodeCommand := flag.NewFlagSet(c.Name(), flag.ContinueOnError)
-	volumeId := encodeCommand.Int("volumeId", 0, "the volume id")
+	//volumeId := encodeCommand.Int("volumeId", 0, "the volume id")
 	collection := encodeCommand.String("collection", "", "the collection name")
 	fullPercentage := encodeCommand.Float64("fullPercent", 95, "the volume reaches the percentage of max volume size")
 	quietPeriod := encodeCommand.Duration("quietFor", time.Hour, "select volumes without no writes for this period")
@@ -79,6 +80,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		return
 	}
 
+	startTime := time.Now()
 	// collect topology information
 	topologyInfo, _, err := collectTopologyInfo(commandEnv, 0)
 	if err != nil {
@@ -87,7 +89,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 
 	if !*forceChanges {
 		var nodeCount int
-		eachDataNode(topologyInfo, func(dc string, rack RackId, dn *master_pb.DataNodeInfo) {
+		eachDataNode(topologyInfo, func(dc DataCenterId, rack RackId, dn *master_pb.DataNodeInfo) {
 			nodeCount++
 		})
 		if nodeCount < erasure_coding.ParityShardsCount {
@@ -96,12 +98,12 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		}
 	}
 
-	vid := needle.VolumeId(*volumeId)
+	//vid := needle.VolumeId(*volumeId)
 
 	// volumeId is provided
-	if vid != 0 {
-		return doEcEncode(commandEnv, *collection, vid, []wdclient.Location{}, wdclient.Location{}, *parallelCopy)
-	}
+	//if vid != 0 {
+	//	return doEcEncode(commandEnv, *collection, vid, nil, *parallelCopy)
+	//}
 
 	// apply to all volumes in the collection
 	volumeIds, err := collectVolumeIdsForEcEncode(commandEnv, *collection, *fullPercentage, *quietPeriod)
@@ -123,52 +125,79 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 			glog.V(0).Infof("End loop process volumes, max volumeId:%d, min volumeId:%d", *maxVolumesId, volumeIds[0])
 			break
 		}
-		fmt.Printf("ec encode volumes: %v, concurrent number:%d \n", volumeIds, maxProcessNum)
+
+		// 限制日志中只显示前50个volumeIds
+		displayVolumeIds := volumeIds
+		if len(volumeIds) > 50 {
+			displayVolumeIds = volumeIds[:50]
+			glog.V(0).Infof("ec encode volumes: %v... (total %d volumes), concurrent number:%d, ec info:%d:%d \n", displayVolumeIds, len(volumeIds), maxProcessNum, erasure_coding.DataShardsCount, erasure_coding.ParityShardsCount)
+		} else {
+			glog.V(0).Infof("ec encode volumes: %v (total %d volumes), concurrent number:%d, ec info:%d:%d \n", volumeIds, len(volumeIds), maxProcessNum, erasure_coding.DataShardsCount, erasure_coding.ParityShardsCount)
+		}
+
 		processVolumeIds := volumeIds
 		if len(volumeIds) > maxProcessNum {
 			processVolumeIds = volumeIds[0:maxProcessNum]
 		}
 		//choose encode location for volumes
-		volumeLocationsMap, volumeChooseLocationMap := chooseEncodeLocationForAllVolumes(commandEnv, processVolumeIds)
+		//volumeLocationsMap, volumeChooseLocationMap := chooseEncodeLocationForAllVolumes(commandEnv, processVolumeIds)
+		allocatorMap, err0 := chooseAllocatorForAllVolumes(commandEnv, processVolumeIds)
+		if err0 != nil {
+			glog.V(0).Infof("choose allocator for volumn fail, volumes:%v, error:%v", processVolumeIds, err0)
+			break
+		}
+
+		if len(allocatorMap) <= 0 {
+			glog.V(0).Infof("choose allocator for volumns fail, volumes:%v, no storage node", processVolumeIds)
+			break
+		}
 
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		var errors = make([]error, 0)
-		wg.Add(len(processVolumeIds))
-		for _, vid := range processVolumeIds {
-			locations := volumeLocationsMap[vid]
-			chooseLoc := volumeChooseLocationMap[vid]
-			go func(env *CommandEnv, coll string, id needle.VolumeId, locs []wdclient.Location, loc wdclient.Location, pc bool) {
+		wg.Add(len(allocatorMap))
+		for vidKey, allocator := range allocatorMap {
+			//locations := volumeLocationsMap[vid]
+			//chooseLoc := volumeChooseLocationMap[vid]
+			//locations := allocator.Locations
+			//chooseLoc := allocator.Choose
+			go func(env *CommandEnv, coll string, id needle.VolumeId, allocator *VolumeEcAllocator, pc bool) {
 				defer wg.Done()
 				if *maxVolumesId > 0 && uint32(id) > uint32(*maxVolumesId) {
 					return
 				}
-				if err = doEcEncode(env, coll, id, locs, loc, pc); err != nil {
+				if err = doEcEncode(env, coll, id, allocator, pc); err != nil {
 					mu.Lock()
 					errors = append(errors, err)
 					fmt.Printf("doEcEncode error:%v \n", err)
 					mu.Unlock()
 				}
-			}(commandEnv, *collection, vid, locations, chooseLoc, *parallelCopy)
+			}(commandEnv, *collection, vidKey, allocator, *parallelCopy)
 		}
 		wg.Wait()
-		if len(errors) > 0 {
-			return errors[0]
-		}
+
 		//sleep 5s
 		time.Sleep(5 * time.Second)
 		volumeIds, err = collectVolumeIdsForEcEncode(commandEnv, *collection, *fullPercentage, *quietPeriod)
 		if err != nil {
 			return err
 		}
+
+		if len(errors) > 0 {
+			return errors[0]
+		}
+
 	}
+	glog.V(0).Infof("ec end, total second time:%ds!", (time.Now().UnixMilli()-startTime.UnixMilli())/1000)
 	return nil
 }
 
 // ensure every volume allocate a master server location for ec encode
-func chooseEncodeLocationForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.VolumeId) (map[needle.VolumeId][]wdclient.Location, map[needle.VolumeId]wdclient.Location) {
+func chooseAllocatorForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.VolumeId) (map[needle.VolumeId]*VolumeEcAllocator, error) {
 	var volumeLocationsMap = make(map[needle.VolumeId][]wdclient.Location)
 	var volumeChooseLocationMap = make(map[needle.VolumeId]wdclient.Location)
+
+	var volumeAllocatorMap = make(map[needle.VolumeId]*VolumeEcAllocator)
 	for _, vid := range volumeIds {
 		locations, found := commandEnv.MasterClient.GetLocationsClone(uint32(vid))
 		if !found {
@@ -185,7 +214,50 @@ func chooseEncodeLocationForAllVolumes(commandEnv *CommandEnv, volumeIds []needl
 		remainVolumeIds = rem
 	}
 
-	return volumeLocationsMap, volumeChooseLocationMap
+	//glog.V(0).Infof("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
+	allEcNodes, totalFreeEcSlots, err := collectEcNodes(commandEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	if totalFreeEcSlots < erasure_coding.TotalShardsCount {
+		return nil, fmt.Errorf("not enough free ec shard slots. only %d left", totalFreeEcSlots)
+	}
+
+	ecb := &ecBalancer{
+		commandEnv: commandEnv,
+		ecNodes:    allEcNodes,
+	}
+
+	for _, vid := range volumeIds {
+		//Ensure EcNodes come from different rack, Prevent uneven distribution
+		allocatedDataNodes := getEcNodesMustDifferentRacks(allEcNodes, ecb)
+		if allocatedDataNodes == nil || len(allocatedDataNodes) <= 0 {
+			glog.V(0).Infof("allocated data nodes Insufficient quantity, volumeId ec failed,vid: %d", vid)
+			break
+		}
+
+		if len(allocatedDataNodes) > erasure_coding.TotalShardsCount {
+			allocatedDataNodes = allocatedDataNodes[:erasure_coding.TotalShardsCount]
+		}
+
+		// calculate how many shards to allocate for these servers，分配存储ec的server
+		//allocatedEcIds {"192.168.10.1:1001": [1,2,9], "192.168.10.1:1002": [3,4,8], "192.168.10.1:1003": [5,6,7]}
+		//allocatedNodes {"192.168.10.1:1001": node, "192.168.10.1:1002": node, "192.168.10.1:1003": node}
+		allocatedEcIds, allocatedNodes := balancedEcDistribution2(allocatedDataNodes, vid)
+
+		ecAllocator := &VolumeEcAllocator{VolumeId: vid, AllocatedEcIds: allocatedEcIds, AllocatedNodes: allocatedNodes, Choose: volumeChooseLocationMap[vid], Locations: volumeLocationsMap[vid]}
+		volumeAllocatorMap[vid] = ecAllocator
+	}
+
+	for _, allocator := range volumeAllocatorMap {
+		//释放当前server
+		for key, _ := range allocator.AllocatedEcIds {
+			ecBusyServerProcessor.remove(key)
+		}
+	}
+
+	return volumeAllocatorMap, nil
 }
 
 // choose a master server for volume
@@ -290,19 +362,17 @@ func splitIP(url string) string {
 	return parts[0]
 }
 
-func doEcEncode(commandEnv *CommandEnv, collection string, vid needle.VolumeId, locations []wdclient.Location, chooseLoc wdclient.Location, parallelCopy bool) (err error) {
+func doEcEncode(commandEnv *CommandEnv, collection string, vid needle.VolumeId, allocator *VolumeEcAllocator, parallelCopy bool) (err error) {
 	if !commandEnv.isLocked() {
 		return fmt.Errorf("lock is lost")
 	}
+
+	var locations []wdclient.Location
+	var chooseLoc wdclient.Location
 	// If volumeId is provided -> (ec.encode -volumeId=<volume_id>)
-	if len(locations) == 0 {
-		var found = false
-		locations, found = commandEnv.MasterClient.GetLocationsClone(uint32(vid))
-		if !found {
-			return fmt.Errorf("volume %d not found", vid)
-		}
-		chooseLoc = locations[0]
-	}
+	locations = allocator.Locations
+	chooseLoc = allocator.Choose
+
 	// mark the volume as readonly
 	err = markVolumeReplicasWritable(commandEnv.option.GrpcDialOption, vid, locations, false, false)
 	if err != nil {
@@ -310,7 +380,7 @@ func doEcEncode(commandEnv *CommandEnv, collection string, vid needle.VolumeId, 
 	}
 
 	// generate and mount ec shards
-	err = generateAndMountEcShards(commandEnv, vid, collection, chooseLoc.ServerAddress())
+	err = generateAndMountEcShards(commandEnv, vid, collection, chooseLoc.ServerAddress(), allocator)
 	if err != nil {
 		return fmt.Errorf("generate ec shards for volume %d on %s: %v", vid, chooseLoc.Url, err)
 	}
@@ -324,26 +394,41 @@ func doEcEncode(commandEnv *CommandEnv, collection string, vid needle.VolumeId, 
 	return nil
 }
 
-func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, collection string, sourceVolumeServer pb.ServerAddress) error {
+func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, collection string, sourceVolumeServer pb.ServerAddress, allocator *VolumeEcAllocator) error {
 
-	fmt.Printf("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
+	//glog.V(0).Infof("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
+	//allEcNodes, totalFreeEcSlots, err := collectEcNodes(commandEnv)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//if totalFreeEcSlots < erasure_coding.TotalShardsCount {
+	//	return fmt.Errorf("not enough free ec shard slots. only %d left", totalFreeEcSlots)
+	//}
+	//
+	//ecb := &ecBalancer{
+	//	commandEnv: commandEnv,
+	//	ecNodes:    allEcNodes,
+	//}
+	//
+	////Ensure EcNodes come from different rack, Prevent uneven distribution
+	//allocatedDataNodes := getEcNodesMustDifferentRacks(allEcNodes, ecb)
+	//if allocatedDataNodes == nil || len(allocatedDataNodes) <= 0 {
+	//	glog.V(0).Infof("allocated data nodes Insufficient quantity, volumeId ec failed,vid: %d", volumeId)
+	//	return fmt.Errorf("allocated data nodes Insufficient quantity, volumeId ec failed,vid: %d", volumeId)
+	//}
+	//
+	//if len(allocatedDataNodes) > erasure_coding.TotalShardsCount {
+	//	allocatedDataNodes = allocatedDataNodes[:erasure_coding.TotalShardsCount]
+	//}
+	//
+	//// calculate how many shards to allocate for these servers，分配存储ec的server
+	////allocatedEcIds {"192.168.10.1:1001": [1,2,9], "192.168.10.1:1002": [3,4,8], "192.168.10.1:1003": [5,6,7]}
+	////allocatedNodes {"192.168.10.1:1001": node, "192.168.10.1:1002": node, "192.168.10.1:1003": node}
+	//allocatedEcIds, allocatedNodes := balancedEcDistribution2(allocatedDataNodes, volumeId)
+	allocatedEcIds, allocatedNodes := allocator.AllocatedEcIds, allocator.AllocatedNodes
 
-	allEcNodes, totalFreeEcSlots, err := collectEcNodes(commandEnv, "")
-	if err != nil {
-		return err
-	}
-
-	if totalFreeEcSlots < erasure_coding.TotalShardsCount {
-		return fmt.Errorf("not enough free ec shard slots. only %d left", totalFreeEcSlots)
-	}
-	//Ensure EcNodes come from different rack, Prevent uneven distribution
-	allocatedDataNodes := getEcNodesMustDifferentRacks(allEcNodes)
-	if len(allocatedDataNodes) > erasure_coding.TotalShardsCount {
-		allocatedDataNodes = allocatedDataNodes[:erasure_coding.TotalShardsCount]
-	}
-
-	// calculate how many shards to allocate for these servers
-	allocatedEcIds, allocatedNodes := balancedEcDistribution2(allocatedDataNodes)
+	glog.V(0).Infof("choose:%v, vid: %d, ec info：%d:%d", allocator.Choose, volumeId, erasure_coding.DataShardsCount, erasure_coding.ParityShardsCount)
 
 	err2 := operation.WithVolumeServerClient(false, sourceVolumeServer, commandEnv.option.GrpcDialOption, func(volumeServerClient volume_server_pb.VolumeServerClient) error {
 		_, genErr := volumeServerClient.VolumeEcShardsGenerate(context.Background(), &volume_server_pb.VolumeEcShardsGenerateRequest{
@@ -390,12 +475,22 @@ func generateAndMountEcShards(commandEnv *CommandEnv, volumeId needle.VolumeId, 
 
 }
 
-func getEcNodesMustDifferentRacks(allEcNodes []*EcNode) []*EcNode {
-	racks := collectRacks(allEcNodes)
+func getEcNodesMustDifferentRacks(allEcNodes []*EcNode, ecb *ecBalancer) []*EcNode {
+	racks := ecb.racks()
+	if len(racks) <= 0 {
+		return nil
+	}
 	// calculate average number of shards an ec rack should have for one volume
 	averageShardsPerEcRack := ceilDivide(erasure_coding.TotalShardsCount, len(racks))
 	var rackEcNodes = make(map[string][]*EcNode)
 	for _, node := range allEcNodes {
+		serverAddress := pb.NewServerAddressWithGrpcPort(node.info.Id, int(node.info.GrpcPort))
+		key := serverAddress.String()
+		//查看当前server是否正在被使用
+		if ecBusyServerProcessor.inUse(key) {
+			continue
+		}
+
 		if _, b := rackEcNodes[string(node.rack)]; !b {
 			arr := make([]*EcNode, 0)
 			rackEcNodes[string(node.rack)] = arr
@@ -405,6 +500,13 @@ func getEcNodesMustDifferentRacks(allEcNodes []*EcNode) []*EcNode {
 		}
 		rackEcNodes[string(node.rack)] = append(rackEcNodes[string(node.rack)], node)
 	}
+	minRackSize := len(racks) - 1
+	//如果可用机柜不足则返回空
+	if len(rackEcNodes) < minRackSize {
+		glog.V(0).Infof("rack insuffic size:%d, min racks:%d", len(rackEcNodes), minRackSize)
+		return nil
+	}
+
 	rackNodesSlice := make([]*EcNode, 0)
 	for _, value := range rackEcNodes {
 		for _, node := range value {
@@ -548,7 +650,9 @@ func balancedEcDistribution(servers []*EcNode) (allocated [][]uint32) {
 	return allocated
 }
 
-func balancedEcDistribution2(servers []*EcNode) (map[string]*volume_server_pb.EcShardIds, map[string]*EcNode) {
+// allocatedEcIds {"192.168.10.1:1001": [1,2,9], "192.168.10.1:1002": [3,4,8], "192.168.10.1:1003": [5,6,7]}
+// allocatedNodes {"192.168.10.1:1001": node, "192.168.10.1:1002": node, "192.168.10.1:1003": node}
+func balancedEcDistribution2(servers []*EcNode, volumeId needle.VolumeId) (map[string]*volume_server_pb.EcShardIds, map[string]*EcNode) {
 	allocated := make(map[string]*volume_server_pb.EcShardIds, len(servers))
 	allocatedNodes := make(map[string]*EcNode, len(servers))
 	allocatedShardIdIndex := uint32(0)
@@ -564,6 +668,8 @@ func balancedEcDistribution2(servers []*EcNode) (map[string]*volume_server_pb.Ec
 			allocated[key].ShardIds = append(allocated[key].ShardIds, allocatedShardIdIndex)
 			allocatedNodes[key] = node
 			allocatedShardIdIndex++
+			//添加到管理器
+			ecBusyServerProcessor.add(key, volumeId)
 		}
 		serverIndex++
 		if serverIndex >= len(servers) {
@@ -588,7 +694,8 @@ func collectVolumeIdsForEcEncode(commandEnv *CommandEnv, selectedCollection stri
 	fmt.Printf("collect volumes quiet for: %d seconds and %.1f%% full\n", quietSeconds, fullPercentage)
 
 	vidMap := make(map[uint32]bool)
-	eachDataNode(topologyInfo, func(dc string, rack RackId, dn *master_pb.DataNodeInfo) {
+	eachDataNode(topologyInfo, func(dc DataCenterId, rack RackId, dn *master_pb.DataNodeInfo) {
+		//eachDataNode(topologyInfo, func(dc string, rack RackId, dn *master_pb.DataNodeInfo) {
 		for _, diskInfo := range dn.DiskInfos {
 			for _, v := range diskInfo.VolumeInfos {
 				// ignore remote volumes

@@ -3,6 +3,7 @@ package weed_server
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"strings"
 	"sync"
@@ -48,26 +49,27 @@ func (ms *MasterServer) ProcessGrowRequest() {
 			if firstRun {
 				firstRun = false
 			} else {
-				time.Sleep(2*time.Minute + time.Duration(120*rand.Float32())*time.Second)
+				time.Sleep(2*time.Minute + time.Duration(30*rand.Float32())*time.Second)
 			}
 			if !ms.Topo.IsLeader() {
 				continue
 			}
-			dcs := ms.Topo.ListDataCenters()
+			dcs := ms.Topo.ListDCAndRacks()
 			var err error
 			for _, vlc := range ms.Topo.ListVolumeLayoutCollections() {
 				vl := vlc.VolumeLayout
 				lastGrowCount := vl.GetLastGrowCount()
+
 				if lastGrowCount < ms.option.MinWriteableVolumeSize {
 					lastGrowCount = ms.option.MinWriteableVolumeSize
 				}
-
 				if vl.HasGrowRequest() {
 					continue
 				}
 				writable, crowded := vl.GetWritableVolumeCount()
 				mustGrow := int(lastGrowCount) - writable
 				glog.V(0).Infof("lastGrowCount:%d, writable:%d, mustGrow:%d \n", lastGrowCount, writable, mustGrow)
+
 				vgr := vlc.ToVolumeGrowRequest()
 				stats.MasterVolumeLayoutWritable.WithLabelValues(vlc.Collection, vgr.DiskType, vgr.Replication, vgr.Ttl).Set(float64(writable))
 				stats.MasterVolumeLayoutCrowded.WithLabelValues(vlc.Collection, vgr.DiskType, vgr.Replication, vgr.Ttl).Set(float64(crowded))
@@ -76,24 +78,30 @@ func (ms *MasterServer) ProcessGrowRequest() {
 				case mustGrow > 0:
 					vgr.WritableVolumeCount = uint32(mustGrow)
 					_, err = ms.VolumeGrow(ctx, vgr)
-				case crowded+volumeGrowStepCount >= writable:
+				case lastGrowCount > 0 && writable < int(lastGrowCount*2) && float64(crowded+volumeGrowStepCount) > float64(writable)*topology.VolumeGrowStrategy.Threshold:
 					vgr.WritableVolumeCount = volumeGrowStepCount
 					_, err = ms.VolumeGrow(ctx, vgr)
-				default:
-					for _, dc := range dcs {
-						if vl.ShouldGrowVolumesByDataNode("DataCenter", dc) {
-							vgr.DataCenter = dc
-							if lastGrowCount > 0 {
-								vgr.WritableVolumeCount = uint32(int(lastGrowCount) / len(dcs))
-							} else {
-								vgr.WritableVolumeCount = volumeGrowStepCount
-							}
-							_, err = ms.VolumeGrow(ctx, vgr)
-						}
-					}
 				}
 				if err != nil {
 					glog.V(0).Infof("volume grow request failed: %+v", err)
+				}
+				writableVolumes := vl.CloneWritableVolumes()
+				for dcId, racks := range dcs {
+					for _, rackId := range racks {
+						if vl.ShouldGrowVolumesByDcAndRack(&writableVolumes, dcId, rackId) {
+							vgr.DataCenter = string(dcId)
+							vgr.Rack = string(rackId)
+							if lastGrowCount > 0 {
+								vgr.WritableVolumeCount = uint32(math.Ceil(float64(lastGrowCount) / float64(len(dcs)*len(racks))))
+							} else {
+								vgr.WritableVolumeCount = volumeGrowStepCount
+							}
+
+							if _, err = ms.VolumeGrow(ctx, vgr); err != nil {
+								glog.V(0).Infof("volume grow request for dc:%s rack:%s failed: %+v", dcId, rackId, err)
+							}
+						}
+					}
 				}
 			}
 		}
@@ -149,14 +157,15 @@ func (ms *MasterServer) ProcessGrowRequest() {
 func (ms *MasterServer) LookupVolume(ctx context.Context, req *master_pb.LookupVolumeRequest) (*master_pb.LookupVolumeResponse, error) {
 
 	resp := &master_pb.LookupVolumeResponse{}
+
 	volumeLocations := ms.lookupVolumeId(req.VolumeOrFileIds, req.Collection)
 
 	for _, volumeOrFileId := range req.VolumeOrFileIds {
 		vid := volumeOrFileId
 		commaSep := strings.Index(vid, ",")
-		if commaSep > 0 {
-			vid = vid[0:commaSep]
-		}
+		//if commaSep > 0 {
+		//	vid = vid[0:commaSep]
+		//}
 		if result, found := volumeLocations[vid]; found {
 			var locations []*master_pb.Location
 			for _, loc := range result.Locations {
@@ -297,7 +306,7 @@ func (ms *MasterServer) VolumeMarkReadonly(ctx context.Context, req *master_pb.V
 
 	replicaPlacement, _ := super_block.NewReplicaPlacementFromByte(byte(req.ReplicaPlacement))
 	vl := ms.Topo.GetVolumeLayout(req.Collection, replicaPlacement, needle.LoadTTLFromUint32(req.Ttl), types.ToDiskType(req.DiskType))
-	dataNodes := ms.Topo.Lookup(req.Collection, needle.VolumeId(req.VolumeId))
+	dataNodes, _ := ms.Topo.Lookup(req.Collection, needle.VolumeId(req.VolumeId))
 
 	for _, dn := range dataNodes {
 		if dn.Ip == req.Ip && dn.Port == int(req.Port) {
@@ -360,4 +369,24 @@ func (ms *MasterServer) VolumeGrow(ctx context.Context, req *master_pb.VolumeGro
 	ms.DoAutomaticVolumeGrow(&volumeGrowRequest)
 
 	return &master_pb.VolumeGrowResponse{}, nil
+}
+
+func (ms *MasterServer) VolumeServerECoding(ctx context.Context, req *master_pb.VolumeServerECodingRequest) (*master_pb.VolumeServerECodingResponse, error) {
+
+	if !ms.Topo.IsLeader() {
+		return nil, raft.NotLeaderError
+	}
+
+	resp := &master_pb.VolumeServerECodingResponse{}
+
+	dn := ms.Topo.GetDataNode(req.Ip, int(req.Port))
+
+	if dn != nil {
+		dn.Lock()
+		dn.IsErasureCoding = req.IsErasureCoding
+		dn.Unlock()
+		glog.V(0).Infof("------set dataNode is coding ip:%s, port:%d, coding:%v", req.Ip, req.Port, req.IsErasureCoding)
+	}
+
+	return resp, nil
 }

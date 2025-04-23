@@ -34,6 +34,7 @@ type Statistics struct {
 	WaitFixReplicationVolumes []WaitFixReplicationVolume `json:"WaitFixReplicationVolumes"`
 	WaitFixEcShardsCount      int64                      `json:"WaitFixEcShardsCount"`
 	WaitFixEcShardsVolumes    []WaitFixEcShardsVolume    `json:"WaitFixEcShardsVolumes"`
+	WriteableVolumes          []WriteableVolume          `json:"WriteableVolumes"`
 }
 
 type WaitFixReplicationVolume struct {
@@ -45,6 +46,13 @@ type WaitFixEcShardsVolume struct {
 	VolumeId      uint32
 	EcShardsCount int64
 	Unrepairable  bool
+}
+
+type WriteableVolume struct {
+	Collection string
+	VolumeId   uint32
+	Urls       []string
+	IsCrowed   bool
 }
 
 type RackStatistics struct {
@@ -107,6 +115,7 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 	}
 	volumeFree := uint64(0)
 	waitFixReplicationVolumes := make([]WaitFixReplicationVolume, 0)
+	writeableVolumes := make([]WriteableVolume, 0)
 	for _, vlc := range t.ListVolumeLayoutCollections() {
 		vl := vlc.VolumeLayout
 		writable, crowded := vl.GetWritableVolumeCount()
@@ -125,12 +134,22 @@ func (t *Topology) ToInfo() (info TopologyInfo) {
 				volume := WaitFixReplicationVolume{VolumeId: uint32(vid), Urls: urls}
 				waitFixReplicationVolumes = append(waitFixReplicationVolumes, volume)
 			}
+			if vl.volumeIsWritable(vid) {
+				urls := make([]string, 0)
+				for _, dn := range location.list {
+					urls = append(urls, dn.Url())
+				}
+				volume := WriteableVolume{Collection: vlc.Collection, VolumeId: uint32(vid), Urls: urls, IsCrowed: vl.volumeIsCrowed(vid)}
+				writeableVolumes = append(writeableVolumes, volume)
+			}
 		}
 		vl.accessLock.RUnlock()
 
 		statistics.WriteableVolumeCount += int64(writable)
 		statistics.CrowdedVolumeCount += int64(crowded)
 	}
+
+	statistics.WriteableVolumes = writeableVolumes
 
 	sort.Slice(waitFixReplicationVolumes, func(i, j int) bool {
 		return waitFixReplicationVolumes[i].VolumeId < waitFixReplicationVolumes[j].VolumeId
