@@ -21,7 +21,7 @@ func (c *commandEcBalance) Name() string {
 func (c *commandEcBalance) Help() string {
 	return `balance all ec shards among all racks and volume servers
 
-	ec.balance [-c EACH_COLLECTION|<collection_name>] [-force] [-dataCenter <data_center>] [-shardReplicaPlacement <replica_placement>]
+	ec.balance [-c EACH_COLLECTION|<collection_name>] [-force] [-dataCenter <data_center>] [-shardReplicaPlacement <replica_placement>] [-maxMoveShards <number>]
 
 	Algorithm:
 	` + ecBalanceAlgorithmDescription
@@ -37,6 +37,7 @@ func (c *commandEcBalance) Do(args []string, commandEnv *CommandEnv, writer io.W
 	dc := balanceCommand.String("dataCenter", "", "only apply the balancing for this dataCenter")
 	shardReplicaPlacement := balanceCommand.String("shardReplicaPlacement", "", "replica placement for EC shards, or master default if empty")
 	applyBalancing := balanceCommand.Bool("force", false, "apply the balancing plan")
+	maxMoveShards := balanceCommand.Int("maxMoveShards", 0, "maximum number of shards to move in one operation, 0 means no limit")
 	if err = balanceCommand.Parse(args); err != nil {
 		return nil
 	}
@@ -55,12 +56,12 @@ func (c *commandEcBalance) Do(args []string, commandEnv *CommandEnv, writer io.W
 	} else {
 		collections = append(collections, *collection)
 	}
-	fmt.Printf("balanceEcVolumes collections %+v\n", len(collections))
+	fmt.Printf("balanceEcVolumes collections %+v, maxMoveShards %d\n", len(collections), *maxMoveShards)
 
 	rp, err := parseReplicaPlacementArg(commandEnv, *shardReplicaPlacement)
 	if err != nil {
 		return err
 	}
 
-	return EcBalance(commandEnv, collections, *dc, rp, *applyBalancing)
+	return EcBalance(commandEnv, collections, *dc, rp, *applyBalancing, *maxMoveShards)
 }

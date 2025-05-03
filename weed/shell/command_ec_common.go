@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/wdclient"
 	"math/rand/v2"
 	"sync"
 	"time"
+
+	"github.com/seaweedfs/seaweedfs/weed/wdclient"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/operation"
@@ -615,6 +616,7 @@ type ecBalancer struct {
 	ecNodes          []*EcNode
 	replicaPlacement *super_block.ReplicaPlacement
 	applyBalancing   bool
+	maxMoveShards    int // 最大移动分片数量限制
 }
 
 func (ecb *ecBalancer) racks() map[RackId]*EcRack {
@@ -635,15 +637,32 @@ func (ecb *ecBalancer) balanceEcVolumes(collection string) error {
 
 	fmt.Printf("balanceEcVolumes %s\n", collection)
 
+	// 跟踪已移动的分片数量
+	movedShards := 0
+
 	if err := ecb.deleteDuplicatedEcShards(collection); err != nil {
 		return fmt.Errorf("delete duplicated collection %s ec shards: %v", collection, err)
 	}
 
-	if err := ecb.balanceEcShardsAcrossRacks(collection); err != nil {
+	// 如果设置了最大移动分片数量限制，并且已移动的分片数量达到限制，则提前结束
+	if ecb.maxMoveShards > 0 && movedShards >= ecb.maxMoveShards {
+		fmt.Printf("已达到最大移动分片数量限制 %d，停止平衡操作\n", ecb.maxMoveShards)
+		return nil
+	}
+
+	// 添加计数器，限制机架间分片移动
+	if err := ecb.balanceEcShardsAcrossRacksWithLimit(collection, &movedShards); err != nil {
 		return fmt.Errorf("balance across racks collection %s ec shards: %v", collection, err)
 	}
 
-	if err := ecb.balanceEcShardsWithinRacks(collection); err != nil {
+	// 如果设置了最大移动分片数量限制，并且已移动的分片数量达到限制，则提前结束
+	if ecb.maxMoveShards > 0 && movedShards >= ecb.maxMoveShards {
+		fmt.Printf("已达到最大移动分片数量限制 %d，停止平衡操作\n", ecb.maxMoveShards)
+		return nil
+	}
+
+	// 添加计数器，限制机架内分片移动
+	if err := ecb.balanceEcShardsWithinRacksWithLimit(collection, &movedShards); err != nil {
 		return fmt.Errorf("balance within racks collection %s ec shards: %v", collection, err)
 	}
 
@@ -1060,7 +1079,7 @@ func (ecb *ecBalancer) collectVolumeIdToEcNodes(collection string) map[needle.Vo
 	return vidLocations
 }
 
-func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplicaPlacement *super_block.ReplicaPlacement, applyBalancing bool) (err error) {
+func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplicaPlacement *super_block.ReplicaPlacement, applyBalancing bool, maxMoveShards int) (err error) {
 	if len(collections) == 0 {
 		return fmt.Errorf("no collections to balance")
 	}
@@ -1079,6 +1098,7 @@ func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplic
 		ecNodes:          allEcNodes,
 		replicaPlacement: ecReplicaPlacement,
 		applyBalancing:   applyBalancing,
+		maxMoveShards:    maxMoveShards,
 	}
 
 	for _, c := range collections {
@@ -1091,4 +1111,169 @@ func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplic
 	}
 
 	return nil
+}
+
+// 新增方法，支持限制移动数量的机架间分片平衡
+func (ecb *ecBalancer) balanceEcShardsAcrossRacksWithLimit(collection string, movedShards *int) error {
+	// collect vid => []ecNode, since previous steps can change the locations
+	vidLocations := ecb.collectVolumeIdToEcNodes(collection)
+	// spread the ec shards evenly
+	for vid, locations := range vidLocations {
+		if err := ecb.doBalanceEcShardsAcrossRacksWithLimit(collection, vid, locations, movedShards); err != nil {
+			return err
+		}
+
+		// 检查是否达到最大移动分片数量限制
+		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+			return nil
+		}
+	}
+	return nil
+}
+
+// 新增方法，支持限制移动数量的机架间分片平衡实现
+func (ecb *ecBalancer) doBalanceEcShardsAcrossRacksWithLimit(collection string, vid needle.VolumeId, locations []*EcNode, movedShards *int) error {
+	racks := ecb.racks()
+
+	// calculate average number of shards an ec rack should have for one volume
+	averageShardsPerEcRack := ceilDivide(erasure_coding.TotalShardsCount, len(racks))
+
+	// see the volume's shards are in how many racks, and how many in each rack
+	rackToShardCount := countShardsByRack(vid, locations)
+	rackEcNodesWithVid := groupBy(locations, func(ecNode *EcNode) string {
+		return string(ecNode.rack)
+	})
+
+	// ecShardsToMove = select overflown ec shards from racks with ec shard counts > averageShardsPerEcRack
+	ecShardsToMove := make(map[erasure_coding.ShardId]*EcNode)
+	for rackId, count := range rackToShardCount {
+		if count <= averageShardsPerEcRack {
+			continue
+		}
+		possibleEcNodes := rackEcNodesWithVid[rackId]
+		for shardId, ecNode := range pickNEcShardsToMoveFrom(possibleEcNodes, vid, count-averageShardsPerEcRack) {
+			ecShardsToMove[shardId] = ecNode
+		}
+	}
+
+	for shardId, ecNode := range ecShardsToMove {
+		// 检查是否达到最大移动分片数量限制
+		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+			return nil
+		}
+
+		rackId, err := ecb.pickRackToBalanceShardsInto(racks, rackToShardCount)
+		if err != nil {
+			fmt.Printf("ec shard %d.%d at %s can not find a destination rack:\n%s\n", vid, shardId, ecNode.info.Id, err.Error())
+			continue
+		}
+
+		var possibleDestinationEcNodes []*EcNode
+		for _, n := range racks[rackId].ecNodes {
+			possibleDestinationEcNodes = append(possibleDestinationEcNodes, n)
+		}
+		err = ecb.pickOneEcNodeAndMoveShard(ecNode, collection, vid, shardId, possibleDestinationEcNodes, movedShards)
+		if err != nil {
+			return err
+		}
+		rackToShardCount[string(rackId)] += 1
+		rackToShardCount[string(ecNode.rack)] -= 1
+		racks[rackId].freeEcSlot -= 1
+		racks[ecNode.rack].freeEcSlot += 1
+	}
+
+	return nil
+}
+
+// 新增方法，支持限制移动数量的机架内分片平衡
+func (ecb *ecBalancer) balanceEcShardsWithinRacksWithLimit(collection string, movedShards *int) error {
+	// collect vid => []ecNode, since previous steps can change the locations
+	vidLocations := ecb.collectVolumeIdToEcNodes(collection)
+	racks := ecb.racks()
+
+	// spread the ec shards evenly
+	for vid, locations := range vidLocations {
+		// 检查是否达到最大移动分片数量限制
+		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+			return nil
+		}
+
+		// see the volume's shards are in how many racks, and how many in each rack
+		rackToShardCount := countShardsByRack(vid, locations)
+		rackEcNodesWithVid := groupBy(locations, func(ecNode *EcNode) string {
+			return string(ecNode.rack)
+		})
+
+		for rackId, _ := range rackToShardCount {
+			// 检查是否达到最大移动分片数量限制
+			if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+				return nil
+			}
+
+			var possibleDestinationEcNodes []*EcNode
+			for _, n := range racks[RackId(rackId)].ecNodes {
+				if _, found := n.info.DiskInfos[string(types.HardDriveType)]; found {
+					possibleDestinationEcNodes = append(possibleDestinationEcNodes, n)
+				}
+			}
+			sourceEcNodes := rackEcNodesWithVid[rackId]
+			averageShardsPerEcNode := ceilDivide(rackToShardCount[rackId], len(possibleDestinationEcNodes))
+			if err := ecb.doBalanceEcShardsWithinOneRackWithLimit(averageShardsPerEcNode, collection, vid, sourceEcNodes, possibleDestinationEcNodes, movedShards); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// 新增方法，支持限制移动数量的机架内分片平衡实现
+func (ecb *ecBalancer) doBalanceEcShardsWithinOneRackWithLimit(averageShardsPerEcNode int, collection string, vid needle.VolumeId, existingLocations, possibleDestinationEcNodes []*EcNode, movedShards *int) error {
+	for _, ecNode := range existingLocations {
+		// 检查是否达到最大移动分片数量限制
+		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+			return nil
+		}
+
+		shardBits := findEcVolumeShards(ecNode, vid)
+		overLimitCount := shardBits.ShardIdCount() - averageShardsPerEcNode
+
+		for _, shardId := range shardBits.ShardIds() {
+			// 检查是否达到最大移动分片数量限制
+			if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+				return nil
+			}
+
+			if overLimitCount <= 0 {
+				break
+			}
+
+			fmt.Printf("%s has %d overlimit, moving ec shard %d.%d\n", ecNode.info.Id, overLimitCount, vid, shardId)
+
+			err := ecb.pickOneEcNodeAndMoveShard(ecNode, collection, vid, shardId, possibleDestinationEcNodes, movedShards)
+			if err != nil {
+				return err
+			}
+
+			overLimitCount--
+		}
+	}
+
+	return nil
+}
+
+// 新增方法，用于追踪分片移动次数的版本
+func (ecb *ecBalancer) pickOneEcNodeAndMoveShard(existingLocation *EcNode, collection string, vid needle.VolumeId, shardId erasure_coding.ShardId, possibleDestinationEcNodes []*EcNode, movedShards *int) error {
+	destNode, err := ecb.pickEcNodeToBalanceShardsInto(vid, existingLocation, possibleDestinationEcNodes)
+	if err != nil {
+		fmt.Printf("WARNING: Could not find suitable taget node for %d.%d:\n%s", vid, shardId, err.Error())
+		return nil
+	}
+
+	fmt.Printf("%s moves ec shard %d.%d to %s\n", existingLocation.info.Id, vid, shardId, destNode.info.Id)
+	err = moveMountedShardToEcNode(ecb.commandEnv, existingLocation, collection, vid, shardId, destNode, ecb.applyBalancing)
+	if err == nil && ecb.applyBalancing {
+		*movedShards++
+		fmt.Printf("已移动 %d 个分片，限制为 %d\n", *movedShards, ecb.maxMoveShards)
+	}
+	return err
 }
