@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/storage/super_block"
@@ -76,8 +77,9 @@ func (c *commandVolumeBalance) Do(args []string, commandEnv *CommandEnv, writer 
 	dc := balanceCommand.String("dataCenter", "", "only apply the balancing for this dataCenter")
 	racks := balanceCommand.String("racks", "", "only apply the balancing for this racks")
 	nodes := balanceCommand.String("nodes", "", "only apply the balancing for this nodes")
-	noLock := balanceCommand.Bool("noLock", false, "do not lock the admin shell at one's own risk")
 	applyBalancing := balanceCommand.Bool("force", false, "apply the balancing plan.")
+	maxMoves := balanceCommand.Int("max", 0, "maximum volume moves (0 means unlimited)")
+	noLock := balanceCommand.Bool("noLock", false, "do not lock the admin shell at one's own risk")
 	if err = balanceCommand.Parse(args); err != nil {
 		return nil
 	}
@@ -107,12 +109,12 @@ func (c *commandVolumeBalance) Do(args []string, commandEnv *CommandEnv, writer 
 			return err
 		}
 		for _, c := range collections {
-			if err = balanceVolumeServers(commandEnv, diskTypes, volumeReplicas, volumeServers, c, *applyBalancing); err != nil {
+			if err = balanceVolumeServers(commandEnv, diskTypes, volumeReplicas, volumeServers, c, *applyBalancing, *maxMoves); err != nil {
 				return err
 			}
 		}
 	} else {
-		if err = balanceVolumeServers(commandEnv, diskTypes, volumeReplicas, volumeServers, *collection, *applyBalancing); err != nil {
+		if err = balanceVolumeServers(commandEnv, diskTypes, volumeReplicas, volumeServers, *collection, *applyBalancing, *maxMoves); err != nil {
 			return err
 		}
 	}
@@ -120,10 +122,10 @@ func (c *commandVolumeBalance) Do(args []string, commandEnv *CommandEnv, writer 
 	return nil
 }
 
-func balanceVolumeServers(commandEnv *CommandEnv, diskTypes []types.DiskType, volumeReplicas map[uint32][]*VolumeReplica, nodes []*Node, collection string, applyBalancing bool) error {
+func balanceVolumeServers(commandEnv *CommandEnv, diskTypes []types.DiskType, volumeReplicas map[uint32][]*VolumeReplica, nodes []*Node, collection string, applyBalancing bool, maxMoves int) error {
 
 	for _, diskType := range diskTypes {
-		if err := balanceVolumeServersByDiskType(commandEnv, diskType, volumeReplicas, nodes, collection, applyBalancing); err != nil {
+		if err := balanceVolumeServersByDiskType(commandEnv, diskType, volumeReplicas, nodes, collection, applyBalancing, maxMoves); err != nil {
 			return err
 		}
 	}
@@ -131,7 +133,7 @@ func balanceVolumeServers(commandEnv *CommandEnv, diskTypes []types.DiskType, vo
 
 }
 
-func balanceVolumeServersByDiskType(commandEnv *CommandEnv, diskType types.DiskType, volumeReplicas map[uint32][]*VolumeReplica, nodes []*Node, collection string, applyBalancing bool) error {
+func balanceVolumeServersByDiskType(commandEnv *CommandEnv, diskType types.DiskType, volumeReplicas map[uint32][]*VolumeReplica, nodes []*Node, collection string, applyBalancing bool, maxMoves int) error {
 
 	for _, n := range nodes {
 		n.selectVolumes(func(v *master_pb.VolumeInformationMessage) bool {
@@ -143,7 +145,7 @@ func balanceVolumeServersByDiskType(commandEnv *CommandEnv, diskType types.DiskT
 			return v.DiskType == string(diskType)
 		})
 	}
-	if err := balanceSelectedVolume(commandEnv, diskType, volumeReplicas, nodes, sortWritableVolumes, applyBalancing); err != nil {
+	if err := balanceSelectedVolume(commandEnv, diskType, volumeReplicas, nodes, sortWritableVolumes, applyBalancing, maxMoves); err != nil {
 		return err
 	}
 
@@ -263,8 +265,9 @@ func sortWritableVolumes(volumes []*master_pb.VolumeInformationMessage) {
 	})
 }
 
-func balanceSelectedVolume(commandEnv *CommandEnv, diskType types.DiskType, volumeReplicas map[uint32][]*VolumeReplica, nodes []*Node, sortCandidatesFn func(volumes []*master_pb.VolumeInformationMessage), applyBalancing bool) (err error) {
+func balanceSelectedVolume(commandEnv *CommandEnv, diskType types.DiskType, volumeReplicas map[uint32][]*VolumeReplica, nodes []*Node, sortCandidatesFn func(volumes []*master_pb.VolumeInformationMessage), applyBalancing bool, maxCount int) (err error) {
 	selectedVolumeCount, volumeMaxCount := 0, float64(0)
+	movedVolumesCount := 0 // 记录已移动的卷数量
 	var nodesWithCapacity []*Node
 	capacityFunc := capacityByMaxVolumeCount(diskType)
 	for _, dn := range nodes {
@@ -280,7 +283,7 @@ func balanceSelectedVolume(commandEnv *CommandEnv, diskType types.DiskType, volu
 
 	hasMoved := true
 
-	// fmt.Fprintf(os.Stdout, " total %d volumes, max %d volumes, idealVolumeRatio %f\n", selectedVolumeCount, volumeMaxCount, idealVolumeRatio)
+	fmt.Fprintf(os.Stdout, " total %d volumes, max %f volumes, idealVolumeRatio %f, maxMoves %d\n", selectedVolumeCount, volumeMaxCount, idealVolumeRatio, maxCount)
 
 	for hasMoved {
 		hasMoved = false
@@ -316,6 +319,15 @@ func balanceSelectedVolume(commandEnv *CommandEnv, diskType types.DiskType, volu
 				return
 			}
 			if hasMoved {
+				// 移动了一个卷，计数器增加
+				movedVolumesCount++
+
+				// 检查是否达到了最大移动限制
+				if maxCount > 0 && movedVolumesCount >= maxCount {
+					glog.V(0).Infof("volume balance stopped after %d moves due to limit of %d", movedVolumesCount, maxCount)
+					return nil
+				}
+
 				// moved one volume
 				break
 			}
