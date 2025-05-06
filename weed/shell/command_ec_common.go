@@ -1153,7 +1153,7 @@ func (ecb *ecBalancer) doBalanceEcShardsAcrossRacksWithLimit(collection string, 
 	// ecShardsToMove = select overflown ec shards from racks with ec shard counts > averageShardsPerEcRack
 	ecShardsToMove := make(map[erasure_coding.ShardId]*EcNode)
 	for rackId, count := range rackToShardCount {
-		fmt.Printf("collection: %s, vid: %d, rackId: %s, count: %d, averageShardsPerEcRack: %d\n", collection, vid, rackId, count, averageShardsPerEcRack)
+		//fmt.Printf("collection: %s, vid: %d, rackId: %s, count: %d, averageShardsPerEcRack: %d\n", collection, vid, rackId, count, averageShardsPerEcRack)
 		if count <= averageShardsPerEcRack {
 			continue
 		}
