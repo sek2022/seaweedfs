@@ -131,6 +131,21 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 		return nil
 	}
 
+	// collect all ec nodes
+	allEcNodes, _, err := collectEcNodes(commandEnv)
+	if err != nil {
+		return err
+	}
+
+	ecShardMap := make(EcShardMap)
+	for _, ecNode := range allEcNodes {
+		ecShardMap.registerEcNode(ecNode, collection)
+	}
+
+	if len(allEcNodes) == 0 {
+		return fmt.Errorf("no nodes available for rebuilding")
+	}
+
 	// 应用修复
 	fmt.Fprintf(writer, "正在修复卷 %d 的所有EC分片...\n", vid)
 
@@ -144,6 +159,7 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 			glog.Errorf("获取服务器 %s 上卷 %d 的EC分片失败: %v", serverAddr, vid, err)
 			continue
 		}
+		fmt.Println("serverAddr:", serverAddr, "shards:", shards)
 
 		if len(shards) == 0 {
 			glog.V(0).Infof("getServerAllEcShards, serverAddr: %s, collection: %s, vid: %d, shards: %v", serverAddr, collection, vid, shards)
@@ -204,6 +220,9 @@ func getServerAllEcShards(commandEnv *CommandEnv, serverAddr pb.ServerAddress, c
 
 			// 收集所有EC分片
 			for _, file := range files {
+				if strings.HasSuffix(file.Name(), ".ecj") || strings.HasSuffix(file.Name(), ".ecx") {
+					continue
+				}
 				if strings.HasPrefix(file.Name(), baseFileName+".ec") {
 					shardId := strings.TrimPrefix(file.Name(), baseFileName+".ec")
 					shards = append(shards, uint32(util.ParseInt(shardId, 0)))
@@ -261,7 +280,7 @@ func findServersWithEcShard(topoInfo *master_pb.TopologyInfo, vid needle.VolumeI
 			for _, ecShardInfo := range diskInfo.EcShardInfos {
 				if needle.VolumeId(ecShardInfo.Id) == vid {
 					servers = append(servers, dn)
-					//break
+					break
 				}
 			}
 		}

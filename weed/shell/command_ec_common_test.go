@@ -2,14 +2,16 @@ package shell
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
 	"github.com/seaweedfs/seaweedfs/weed/storage/super_block"
+	"github.com/seaweedfs/seaweedfs/weed/util"
 )
 
 var (
@@ -253,4 +255,14 @@ func Test_VolumeIdSort(t *testing.T) {
 	fmt.Println("after sort:", volumeIds)
 	//
 	ast.Equal(destVolumeIds, volumeIds)
+}
+
+func Test_EcNode_GetShardIds(t *testing.T) {
+	// shardId := "07"
+	baseFileName := "123"
+	fileName := "123.ecj"
+	shardId := strings.TrimPrefix(fileName, baseFileName+".ec")
+	fmt.Println("shardId:", shardId)
+	usid := uint32(util.ParseInt(shardId, 0))
+	fmt.Println("usid:", usid)
 }
