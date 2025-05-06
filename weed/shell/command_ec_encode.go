@@ -141,6 +141,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 		}
 		//choose encode location for volumes
 		//volumeLocationsMap, volumeChooseLocationMap := chooseEncodeLocationForAllVolumes(commandEnv, processVolumeIds)
+		glog.V(0).Infof("start process processVolumeIds: %v", processVolumeIds)
 		allocatorMap, err0 := chooseAllocatorForAllVolumes(commandEnv, processVolumeIds)
 		if err0 != nil {
 			glog.V(0).Infof("choose allocator for volumn fail, volumes:%v, error:%v", processVolumeIds, err0)
@@ -206,12 +207,20 @@ func chooseAllocatorForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 		volumeLocationsMap[vid] = locations
 	}
 	remainVolumeIds := volumeIds
+
+	chooseTimes := 0
 	for len(remainVolumeIds) > 0 {
 		locationMap, rem := chooseMasterServerForVolumes(commandEnv, remainVolumeIds)
 		for key, value := range locationMap {
 			volumeChooseLocationMap[key] = value
 		}
 		remainVolumeIds = rem
+		chooseTimes++
+
+		if chooseTimes > len(remainVolumeIds)*2 {
+			glog.V(0).Infof("chooseMasterServerForVolumes, chooseTimes: %d, remainVolumeIds: %v, die loop......", chooseTimes, remainVolumeIds)
+			break
+		}
 	}
 
 	//glog.V(0).Infof("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
@@ -269,13 +278,14 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 	for _, vid := range volumeIds {
 		locations, found := commandEnv.MasterClient.GetLocationsClone(uint32(vid))
 		if !found {
+			glog.V(0).Infof("chooseMasterServerForVolumes, volumeId: %d, not found", vid)
 			continue
 		}
 		volumeLocationsMap[vid] = locations
 		for _, loc := range locations {
 			serverIp := splitIP(loc.Url)
 			if len(serverIp) <= 0 {
-				fmt.Printf("loc url is err:%s", loc.Url)
+				glog.V(0).Infof("loc url is err:%s", loc.Url)
 				continue
 			}
 			//init 1 times
@@ -308,13 +318,16 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 		for index, vid := range currentVolumeIds {
 			locations := volumeLocationsMap[needle.VolumeId(vid)]
 			if len(locations) == 0 {
+				time.Sleep(1 * time.Second)
+				glog.V(0).Infof("chooseMasterServerForVolumes, volumeId: %d, not found", vid)
 				continue
 			}
 			var chooseLoc = wdclient.Location{}
 			for _, loc := range locations {
 				serverIp := splitIP(loc.Url)
 				if len(serverIp) <= 0 {
-					fmt.Printf("loc url is err:%s", loc.Url)
+					time.Sleep(1 * time.Second)
+					glog.V(0).Infof("loc url is err:%s", loc.Url)
 					continue
 				}
 				if keys[index] == serverIp {
