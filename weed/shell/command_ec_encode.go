@@ -153,6 +153,8 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 			break
 		}
 
+		glog.V(0).Infof("allocatorMap: %v", allocatorMap)
+
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		var errors = make([]error, 0)
@@ -209,6 +211,7 @@ func chooseAllocatorForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 	remainVolumeIds := volumeIds
 
 	chooseTimes := 0
+	srcLen := len(remainVolumeIds)
 	for len(remainVolumeIds) > 0 {
 		locationMap, rem := chooseMasterServerForVolumes(commandEnv, remainVolumeIds)
 		for key, value := range locationMap {
@@ -217,18 +220,19 @@ func chooseAllocatorForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 		remainVolumeIds = rem
 		chooseTimes++
 
-		if chooseTimes > len(remainVolumeIds)*2 {
+		if chooseTimes > srcLen*2 {
 			glog.V(0).Infof("chooseMasterServerForVolumes, chooseTimes: %d, remainVolumeIds: %v, die loop......", chooseTimes, remainVolumeIds)
 			return nil, fmt.Errorf("chooseMasterServerForVolumes, chooseTimes: %d, remainVolumeIds: %v, die loop", chooseTimes, remainVolumeIds)
 		}
 	}
 
 	//glog.V(0).Infof("generateEcShards %s %d on %s ...\n", collection, volumeId, sourceVolumeServer)
+
 	allEcNodes, totalFreeEcSlots, err := collectEcNodes(commandEnv)
 	if err != nil {
 		return nil, err
 	}
-
+	glog.V(0).Infof("allEcNodes: %v, totalFreeEcSlots: %d", allEcNodes, totalFreeEcSlots)
 	if totalFreeEcSlots < erasure_coding.TotalShardsCount {
 		return nil, fmt.Errorf("not enough free ec shard slots. only %d left", totalFreeEcSlots)
 	}
@@ -309,6 +313,7 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 	for i, key := range keys {
 		combinations[i] = serversWithVolumes[key]
 	}
+	glog.V(0).Infof("combinations: %v", combinations)
 	volumeCombinations := getCombination(combinations...)
 	maxCount := 0
 	var maxVolumeChooseLocationMap map[needle.VolumeId]wdclient.Location
