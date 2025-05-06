@@ -146,6 +146,7 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 		}
 
 		if len(shards) == 0 {
+			glog.V(0).Infof("getServerAllEcShards, serverAddr: %s, collection: %s, vid: %d, shards: %v", serverAddr, collection, vid, shards)
 			continue
 		}
 
