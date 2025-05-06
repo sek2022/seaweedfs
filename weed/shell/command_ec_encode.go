@@ -303,11 +303,14 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 		}
 	}
 
+	glog.V(0).Infof("serversWithVolumes: %v", serversWithVolumes)
+
 	keys := make([]string, 0, len(serversWithVolumes))
 	for k := range serversWithVolumes {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	glog.V(0).Infof("keys: %v", keys)
 
 	var combinations = make([][]uint32, len(serversWithVolumes))
 	for i, key := range keys {
@@ -315,6 +318,7 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 	}
 	glog.V(0).Infof("combinations: %v", combinations)
 	volumeCombinations := getCombination(combinations...)
+
 	maxCount := 0
 	var maxVolumeChooseLocationMap map[needle.VolumeId]wdclient.Location
 
