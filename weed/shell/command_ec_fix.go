@@ -319,6 +319,7 @@ func ecFixUnmountShards(grpcDialOption grpc.DialOption, volumeId needle.VolumeId
 
 // 从源服务器删除EC分片
 func ecFixDeleteShards(grpcDialOption grpc.DialOption, collection string, volumeId needle.VolumeId, sourceServerAddress pb.ServerAddress, shardIds []uint32) error {
+	fmt.Printf("delete %d.%v from %s\n", volumeId, shardIds, sourceServerAddress)
 	return operation.WithVolumeServerClient(false, sourceServerAddress, grpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
 		_, err := client.VolumeEcShardsDelete(context.Background(), &volume_server_pb.VolumeEcShardsDeleteRequest{
 			VolumeId:   uint32(volumeId),
