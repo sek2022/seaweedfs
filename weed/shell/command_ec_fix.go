@@ -172,7 +172,7 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 		fmt.Fprintf(writer, "serverAddr: %s, issue: %+v \n", serverAddr, issue)
 
 		// 修复所有EC分片
-		//err = applyEcFix(commandEnv, serverAddr, collection, vid, issue)
+		err = applyEcFix(commandEnv, serverAddr, collection, vid, issue)
 		glog.V(0).Infof("applyEcFix, serverAddr: %s, collection: %s, vid: %d, shards: %v", serverAddr, collection, vid, shards)
 
 		if err != nil {
