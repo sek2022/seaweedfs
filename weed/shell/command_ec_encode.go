@@ -285,6 +285,7 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 			glog.V(0).Infof("chooseMasterServerForVolumes, volumeId: %d, not found", vid)
 			continue
 		}
+		glog.V(0).Infof("chooseMasterServerForVolumes, volumeId: %d, locations: %v", vid, locations)
 		volumeLocationsMap[vid] = locations
 		for _, loc := range locations {
 			serverIp := splitIP(loc.Url)
