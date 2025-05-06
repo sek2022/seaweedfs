@@ -5,17 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"strings"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/operation"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
-	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
-	"github.com/seaweedfs/seaweedfs/weed/util"
 	"google.golang.org/grpc"
 )
 
@@ -200,32 +196,26 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 func getServerAllEcShards(commandEnv *CommandEnv, serverAddr pb.ServerAddress, collection string, vid needle.VolumeId) ([]uint32, error) {
 	var shards []uint32
 
-	err := operation.WithVolumeServerClient(false, serverAddr, commandEnv.option.GrpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
-		// 获取服务器信息
-		resp, err := client.VolumeServerStatus(context.Background(), &volume_server_pb.VolumeServerStatusRequest{})
+	// 查找卷的EC分片信息
+	ecShardInfoMap := make(map[uint32]bool)
+
+	// 首先尝试通过主节点查询EC卷信息
+	err := commandEnv.MasterClient.WithClient(false, func(client master_pb.SeaweedClient) error {
+		resp, err := client.LookupEcVolume(context.Background(), &master_pb.LookupEcVolumeRequest{
+			VolumeId: uint32(vid),
+		})
 		if err != nil {
 			return err
 		}
 
-		// 查找所有EC分片
-		for _, loc := range resp.DiskStatuses {
-			baseFileName := erasure_coding.EcShardBaseFileName(collection, int(vid))
-			dirName := loc.Dir
-
-			// 在数据目录下扫描分片文件
-			files, err := os.ReadDir(dirName)
-			if err != nil {
-				return fmt.Errorf("无法读取目录 %s: %v", dirName, err)
-			}
-
-			// 收集所有EC分片
-			for _, file := range files {
-				if strings.HasSuffix(file.Name(), ".ecj") || strings.HasSuffix(file.Name(), ".ecx") {
-					continue
-				}
-				if strings.HasPrefix(file.Name(), baseFileName+".ec") {
-					shardId := strings.TrimPrefix(file.Name(), baseFileName+".ec")
-					shards = append(shards, uint32(util.ParseInt(shardId, 0)))
+		// 查找特定服务器上的分片
+		for _, shardLocation := range resp.ShardIdLocations {
+			for _, location := range shardLocation.Locations {
+				// 创建正确的 ServerAddress 对象
+				locAddr := pb.NewServerAddressWithGrpcPort(location.Url, int(location.GrpcPort))
+				if locAddr == serverAddr {
+					ecShardInfoMap[shardLocation.ShardId] = true
+					break
 				}
 			}
 		}
@@ -233,7 +223,16 @@ func getServerAllEcShards(commandEnv *CommandEnv, serverAddr pb.ServerAddress, c
 		return nil
 	})
 
-	return shards, err
+	if err != nil {
+		return nil, err
+	}
+
+	// 将找到的分片ID添加到结果中
+	for shardId := range ecShardInfoMap {
+		shards = append(shards, shardId)
+	}
+
+	return shards, nil
 }
 
 // 检查卷是否存在于正常状态（而非EC状态）
