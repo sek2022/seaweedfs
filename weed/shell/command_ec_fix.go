@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
@@ -106,40 +105,143 @@ func collectAllEcShardIds(topoInfo *master_pb.TopologyInfo) (volumeIds []needle.
 
 // 修复特定卷ID的EC问题
 func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo, collection string, vid needle.VolumeId, applyChanges bool, writer io.Writer) error {
-	// 查找问题卷的位置信息
-	problems, err := findEcVolumeProblems(commandEnv, topoInfo, collection, vid)
+	// 首先检查卷是否还处于 volume 状态
+	// 如果 EC 编码成功完成，volume 状态就不存在了
+	hasNormalVolume, err := checkVolumeExistence(commandEnv, vid)
 	if err != nil {
-		return fmt.Errorf("查找卷 %d 的问题时出错: %v", vid, err)
+		return fmt.Errorf("检查卷 %d 状态时出错: %v", vid, err)
 	}
 
-	if len(problems) == 0 {
-		fmt.Fprintf(writer, "卷 %d 没有发现问题\n", vid)
+	if !hasNormalVolume {
+		fmt.Fprintf(writer, "卷 %d 不存在或已经成功完成 EC 编码，无需修复\n", vid)
 		return nil
 	}
 
-	fmt.Fprintf(writer, "发现卷 %d 有以下问题:\n", vid)
-	for serverAddr, issue := range problems {
-		fmt.Fprintf(writer, "  服务器 %s: %s\n", serverAddr, issue.description)
+	// 查找所有包含此卷分片的服务器
+	servers := findServersWithEcShard(topoInfo, vid)
+	if len(servers) == 0 {
+		fmt.Fprintf(writer, "未找到卷 %d 的任何EC分片服务器，无需修复\n", vid)
+		return nil
 	}
 
+	fmt.Fprintf(writer, "发现卷 %d 有 %d 个服务器包含EC分片\n", vid, len(servers))
+
 	if !applyChanges {
-		fmt.Fprintf(writer, "添加 -force 参数以修复这些问题\n")
+		fmt.Fprintf(writer, "添加 -force 参数以修复这些服务器上的EC分片\n")
 		return nil
 	}
 
 	// 应用修复
-	fmt.Fprintf(writer, "正在修复卷 %d 的问题...\n", vid)
-	for serverAddr, issue := range problems {
-		//err := applyEcFix(commandEnv, serverAddr, collection, vid, issue)
-		glog.V(0).Infof("applyEcFix, serverAddr: %s, collection: %s, vid: %d, issue: %v", serverAddr, collection, vid, issue)
-		// if err != nil {
-		// 	fmt.Fprintf(writer, "  修复服务器 %s 上卷 %d 的问题失败: %v\n", serverAddr, vid, err)
-		// } else {
-		// 	fmt.Fprintf(writer, "  已成功修复服务器 %s 上卷 %d 的问题\n", serverAddr, vid)
-		// }
+	fmt.Fprintf(writer, "正在修复卷 %d 的所有EC分片...\n", vid)
+
+	fixedCount := 0
+	for _, server := range servers {
+		serverAddr := pb.NewServerAddressFromDataNode(server)
+
+		// 直接获取所有EC分片
+		shards, err := getServerAllEcShards(commandEnv, serverAddr, collection, vid)
+		if err != nil {
+			glog.Errorf("获取服务器 %s 上卷 %d 的EC分片失败: %v", serverAddr, vid, err)
+			continue
+		}
+
+		if len(shards) == 0 {
+			continue
+		}
+
+		// 创建修复请求
+		issue := &ecShardIssue{
+			description:  fmt.Sprintf("包含 %d 个EC分片，执行清理", len(shards)),
+			incompleteEC: true,
+			shards:       shards,
+		}
+
+		fmt.Fprintf(writer, "serverAddr: %s, issue: %+v \n", serverAddr, issue)
+
+		// 修复所有EC分片
+		//err = applyEcFix(commandEnv, serverAddr, collection, vid, issue)
+		glog.V(0).Infof("applyEcFix, serverAddr: %s, collection: %s, vid: %d, shards: %v", serverAddr, collection, vid, shards)
+
+		if err != nil {
+			fmt.Fprintf(writer, "  修复服务器 %s 上卷 %d 的EC分片失败: %v\n", serverAddr, vid, err)
+		} else {
+			fmt.Fprintf(writer, "  已成功修复服务器 %s 上卷 %d 的 %d 个EC分片\n", serverAddr, vid, len(shards))
+			fixedCount += len(shards)
+		}
+	}
+
+	if fixedCount > 0 {
+		fmt.Fprintf(writer, "共成功修复 %d 个EC分片\n", fixedCount)
+	} else {
+		fmt.Fprintf(writer, "没有修复任何EC分片\n")
 	}
 
 	return nil
+}
+
+// 获取服务器上卷的所有EC分片
+func getServerAllEcShards(commandEnv *CommandEnv, serverAddr pb.ServerAddress, collection string, vid needle.VolumeId) ([]uint32, error) {
+	var shards []uint32
+
+	err := operation.WithVolumeServerClient(false, serverAddr, commandEnv.option.GrpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
+		// 获取服务器信息
+		resp, err := client.VolumeServerStatus(context.Background(), &volume_server_pb.VolumeServerStatusRequest{})
+		if err != nil {
+			return err
+		}
+
+		// 查找所有EC分片
+		for _, loc := range resp.DiskStatuses {
+			baseFileName := erasure_coding.EcShardBaseFileName(collection, int(vid))
+			dirName := loc.Dir
+
+			// 在数据目录下扫描分片文件
+			files, err := os.ReadDir(dirName)
+			if err != nil {
+				return fmt.Errorf("无法读取目录 %s: %v", dirName, err)
+			}
+
+			// 收集所有EC分片
+			for _, file := range files {
+				if strings.HasPrefix(file.Name(), baseFileName+".ec") {
+					shardId := strings.TrimPrefix(file.Name(), baseFileName+".ec")
+					shards = append(shards, uint32(util.ParseInt(shardId, 0)))
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return shards, err
+}
+
+// 检查卷是否存在于正常状态（而非EC状态）
+func checkVolumeExistence(commandEnv *CommandEnv, vid needle.VolumeId) (bool, error) {
+	var hasNormalVolume bool
+
+	// 查找所有数据节点
+	err := commandEnv.MasterClient.WithClient(false, func(client master_pb.SeaweedClient) error {
+		resp, err := client.LookupVolume(context.Background(), &master_pb.LookupVolumeRequest{
+			VolumeOrFileIds: []string{vid.String()},
+		})
+
+		if err != nil {
+			return err
+		}
+
+		// 如果能找到卷，并且没有错误信息，说明这是个普通卷
+		for _, loc := range resp.VolumeIdLocations {
+			if loc.Error == "" && len(loc.Locations) > 0 {
+				hasNormalVolume = true
+				return nil
+			}
+		}
+
+		return nil
+	})
+
+	return hasNormalVolume, err
 }
 
 // EC分片问题类型
@@ -147,34 +249,6 @@ type ecShardIssue struct {
 	description  string
 	incompleteEC bool
 	shards       []uint32
-}
-
-// 查找EC卷问题
-func findEcVolumeProblems(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo, collection string, vid needle.VolumeId) (map[pb.ServerAddress]*ecShardIssue, error) {
-	issues := make(map[pb.ServerAddress]*ecShardIssue)
-
-	// 查找所有包含此卷分片的服务器
-	servers := findServersWithEcShard(topoInfo, vid)
-	if len(servers) == 0 {
-		return nil, fmt.Errorf("未找到卷 %d 的任何服务器", vid)
-	}
-
-	// 检查每个服务器上的分片状态
-	for _, server := range servers {
-		serverAddr := pb.NewServerAddressFromDataNode(server)
-
-		issue, err := checkServerEcShardStatus(commandEnv, serverAddr, collection, vid)
-		if err != nil {
-			glog.Errorf("检查服务器 %s 上卷 %d 的分片状态失败: %v", serverAddr, vid, err)
-			continue
-		}
-
-		if issue != nil {
-			issues[serverAddr] = issue
-		}
-	}
-
-	return issues, nil
 }
 
 // 查找包含指定EC分片的所有服务器
@@ -186,99 +260,13 @@ func findServersWithEcShard(topoInfo *master_pb.TopologyInfo, vid needle.VolumeI
 			for _, ecShardInfo := range diskInfo.EcShardInfos {
 				if needle.VolumeId(ecShardInfo.Id) == vid {
 					servers = append(servers, dn)
-					break
+					//break
 				}
 			}
 		}
 	})
 
 	return servers
-}
-
-// 检查服务器上特定卷的EC分片状态
-func checkServerEcShardStatus(commandEnv *CommandEnv, serverAddr pb.ServerAddress, collection string, vid needle.VolumeId) (*ecShardIssue, error) {
-	var issue *ecShardIssue
-
-	err := operation.WithVolumeServerClient(false, serverAddr, commandEnv.option.GrpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
-		// 获取服务器信息
-		resp, err := client.VolumeServerStatus(context.Background(), &volume_server_pb.VolumeServerStatusRequest{})
-		if err != nil {
-			return err
-		}
-
-		// 检查EC文件状态
-		for _, loc := range resp.DiskStatuses {
-			baseFileName := erasure_coding.EcShardBaseFileName(collection, int(vid))
-			dirName := loc.Dir
-
-			// 构造索引目录名
-			// 在SeaweedFS中，索引文件通常存储在数据目录的子目录中
-			idxDirName := filepath.Join(dirName, "idx")
-			if !util.FolderExists(idxDirName) {
-				// 尝试从数据目录推断索引目录位置
-				idxDirName = dirName
-			}
-
-			// 检查是否有.ecx文件
-			hasEcxFile := util.FileExists(filepath.Join(idxDirName, baseFileName+".ecx"))
-
-			// 计算现有的分片数量
-			var existingShards []uint32
-			var incompleteEcShard bool
-
-			// 在数据目录下扫描分片文件
-			files, err := os.ReadDir(dirName)
-			if err != nil {
-				return fmt.Errorf("无法读取目录 %s: %v", dirName, err)
-			}
-
-			// 统计分片文件
-			shardCount := 0
-			for _, file := range files {
-				if strings.HasPrefix(file.Name(), baseFileName+".ec") {
-					shardId := strings.TrimPrefix(file.Name(), baseFileName+".ec")
-					existingShards = append(existingShards, uint32(util.ParseInt(shardId, 0)))
-					shardCount++
-				}
-			}
-
-			// 检查EC分片完整性问题
-			if hasEcxFile {
-				// 有.ecx文件的情况下，如果分片数量不足，认为是不完整的
-				if shardCount > 0 && shardCount < erasure_coding.TotalShardsCount {
-					incompleteEcShard = true
-					issue = &ecShardIssue{
-						description:  fmt.Sprintf("不完整的EC分片：有.ecx文件但只有%d个分片（总共应有%d个）", shardCount, erasure_coding.TotalShardsCount),
-						incompleteEC: true,
-						shards:       existingShards,
-					}
-				}
-			} else {
-				// 没有.ecx文件但存在分片文件，认为是编码过程被中断
-				if shardCount > 0 {
-					incompleteEcShard = true
-					issue = &ecShardIssue{
-						description:  fmt.Sprintf("编码中断：缺少.ecx文件但存在%d个分片文件", shardCount),
-						incompleteEC: true,
-						shards:       existingShards,
-					}
-				}
-			}
-
-			// 如果发现问题，不需要继续检查其他目录
-			if incompleteEcShard {
-				break
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return issue, nil
 }
 
 // 应用EC分片修复
