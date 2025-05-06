@@ -219,7 +219,7 @@ func chooseAllocatorForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 
 		if chooseTimes > len(remainVolumeIds)*2 {
 			glog.V(0).Infof("chooseMasterServerForVolumes, chooseTimes: %d, remainVolumeIds: %v, die loop......", chooseTimes, remainVolumeIds)
-			break
+			return nil, fmt.Errorf("chooseMasterServerForVolumes, chooseTimes: %d, remainVolumeIds: %v, die loop", chooseTimes, remainVolumeIds)
 		}
 	}
 
