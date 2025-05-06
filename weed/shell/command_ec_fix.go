@@ -309,11 +309,15 @@ func applyEcFix(commandEnv *CommandEnv, serverAddr pb.ServerAddress, collection 
 
 // 卸载EC分片
 func ecFixUnmountShards(grpcDialOption grpc.DialOption, volumeId needle.VolumeId, sourceServerAddress pb.ServerAddress, shardIds []uint32) error {
-	return operation.WithVolumeServerClient(false, sourceServerAddress, grpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
-		_, err := client.VolumeUnmount(context.Background(), &volume_server_pb.VolumeUnmountRequest{
+
+	fmt.Printf("unmount %d.%v from %s\n", volumeId, shardIds, sourceServerAddress)
+
+	return operation.WithVolumeServerClient(false, sourceServerAddress, grpcDialOption, func(volumeServerClient volume_server_pb.VolumeServerClient) error {
+		_, deleteErr := volumeServerClient.VolumeEcShardsUnmount(context.Background(), &volume_server_pb.VolumeEcShardsUnmountRequest{
 			VolumeId: uint32(volumeId),
+			ShardIds: shardIds,
 		})
-		return err
+		return deleteErr
 	})
 }
 
