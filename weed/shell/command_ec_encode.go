@@ -232,7 +232,7 @@ func chooseAllocatorForAllVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 	if err != nil {
 		return nil, err
 	}
-	glog.V(0).Infof("allEcNodes: %v, totalFreeEcSlots: %d", allEcNodes, totalFreeEcSlots)
+	//glog.V(0).Infof("allEcNodes: %v, totalFreeEcSlots: %d", allEcNodes, totalFreeEcSlots)
 	if totalFreeEcSlots < erasure_coding.TotalShardsCount {
 		return nil, fmt.Errorf("not enough free ec shard slots. only %d left", totalFreeEcSlots)
 	}
