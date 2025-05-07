@@ -7,12 +7,9 @@ import (
 	"io"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
-	"github.com/seaweedfs/seaweedfs/weed/operation"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/master_pb"
-	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
-	"google.golang.org/grpc"
 )
 
 func init() {
@@ -120,7 +117,7 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 		return nil
 	}
 
-	fmt.Fprintf(writer, "发现卷 %d 有 %d 个服务器包含EC分片\n", vid, len(servers))
+	//fmt.Fprintf(writer, "发现卷 %d 有 %d 个服务器包含EC分片\n", vid, len(servers))
 
 	if !applyChanges {
 		fmt.Fprintf(writer, "添加 -force 参数以修复这些服务器上的EC分片\n")
@@ -143,7 +140,7 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 	}
 
 	// 应用修复
-	fmt.Fprintf(writer, "正在修复卷 %d 的所有EC分片...\n", vid)
+	//fmt.Fprintf(writer, "正在修复卷 %d 的所有EC分片...\n", vid)
 
 	fixedCount := 0
 	for _, server := range servers {
@@ -169,7 +166,7 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 			shards:       shards,
 		}
 
-		fmt.Fprintf(writer, "serverAddr: %s, issue: %+v \n", serverAddr, issue)
+		//fmt.Fprintf(writer, "serverAddr: %s, issue: %+v \n", serverAddr, issue)
 
 		// 修复所有EC分片
 		err = applyEcFix(commandEnv, serverAddr, collection, vid, issue)
@@ -295,41 +292,32 @@ func applyEcFix(commandEnv *CommandEnv, serverAddr pb.ServerAddress, collection 
 	}
 
 	// 首先卸载EC分片
-	if err := ecFixUnmountShards(commandEnv.option.GrpcDialOption, vid, serverAddr, issue.shards); err != nil {
-		return fmt.Errorf("卸载分片 %d.%v 失败: %v", vid, issue.shards, err)
+	fmt.Printf("unmount ec volume %d on %s has shards: %+v\n", vid, serverAddr, issue.shards)
+	err := unmountEcShards(commandEnv.option.GrpcDialOption, vid, serverAddr, issue.shards)
+	if err != nil {
+		return fmt.Errorf("mountVolumeAndDeleteEcShards unmount ec volume %d on %s: %v", vid, serverAddr, err)
 	}
 
-	// 然后删除不完整的EC分片文件
-	if err := ecFixDeleteShards(commandEnv.option.GrpcDialOption, collection, vid, serverAddr, issue.shards); err != nil {
-		return fmt.Errorf("删除分片 %d.%v 失败: %v", vid, issue.shards, err)
+	fmt.Printf("delete ec volume %d on %s has shards: %+v\n", vid, serverAddr, issue.shards)
+	err2 := sourceServerDeleteEcShards(commandEnv.option.GrpcDialOption, collection, vid, serverAddr, issue.shards)
+	if err2 != nil {
+		return fmt.Errorf("mountVolumeAndDeleteEcShards delete ec volume %d on %s: %v", vid, serverAddr, err2)
 	}
+	// 重置vidMap, 清除缓存 避免数据中心变更后，vidMap不更新
+	commandEnv.MasterClient.TryResetVidMap()
 
 	return nil
 }
 
-// 卸载EC分片
-func ecFixUnmountShards(grpcDialOption grpc.DialOption, volumeId needle.VolumeId, sourceServerAddress pb.ServerAddress, shardIds []uint32) error {
-
-	fmt.Printf("unmount %d.%v from %s\n", volumeId, shardIds, sourceServerAddress)
-
-	return operation.WithVolumeServerClient(false, sourceServerAddress, grpcDialOption, func(volumeServerClient volume_server_pb.VolumeServerClient) error {
-		_, deleteErr := volumeServerClient.VolumeEcShardsUnmount(context.Background(), &volume_server_pb.VolumeEcShardsUnmountRequest{
-			VolumeId: uint32(volumeId),
-			ShardIds: shardIds,
-		})
-		return deleteErr
-	})
-}
-
 // 从源服务器删除EC分片
-func ecFixDeleteShards(grpcDialOption grpc.DialOption, collection string, volumeId needle.VolumeId, sourceServerAddress pb.ServerAddress, shardIds []uint32) error {
-	fmt.Printf("delete %d.%v from %s\n", volumeId, shardIds, sourceServerAddress)
-	return operation.WithVolumeServerClient(false, sourceServerAddress, grpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
-		_, err := client.VolumeEcShardsDelete(context.Background(), &volume_server_pb.VolumeEcShardsDeleteRequest{
-			VolumeId:   uint32(volumeId),
-			Collection: collection,
-			ShardIds:   shardIds,
-		})
-		return err
-	})
-}
+// func ecFixDeleteShards(grpcDialOption grpc.DialOption, collection string, volumeId needle.VolumeId, sourceServerAddress pb.ServerAddress, shardIds []uint32) error {
+// 	fmt.Printf("delete %d.%v from %s\n", volumeId, shardIds, sourceServerAddress)
+// 	return operation.WithVolumeServerClient(false, sourceServerAddress, grpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
+// 		_, err := client.VolumeEcShardsDelete(context.Background(), &volume_server_pb.VolumeEcShardsDeleteRequest{
+// 			VolumeId:   uint32(volumeId),
+// 			Collection: collection,
+// 			ShardIds:   shardIds,
+// 		})
+// 		return err
+// 	})
+// }

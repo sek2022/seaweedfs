@@ -153,7 +153,7 @@ func (c *commandEcEncode) Do(args []string, commandEnv *CommandEnv, writer io.Wr
 			break
 		}
 
-		glog.V(0).Infof("allocatorMap: %v", allocatorMap)
+		//glog.V(0).Infof("allocatorMap: %v", allocatorMap)
 
 		var wg sync.WaitGroup
 		var mu sync.Mutex
@@ -285,7 +285,7 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 			glog.V(0).Infof("chooseMasterServerForVolumes, volumeId: %d, not found", vid)
 			continue
 		}
-		glog.V(0).Infof("chooseMasterServerForVolumes, volumeId: %d, locations: %v", vid, locations)
+		//glog.V(0).Infof("chooseMasterServerForVolumes, volumeId: %d, locations: %v", vid, locations)
 		volumeLocationsMap[vid] = locations
 		for _, loc := range locations {
 			serverIp := splitIP(loc.Url)
@@ -304,20 +304,20 @@ func chooseMasterServerForVolumes(commandEnv *CommandEnv, volumeIds []needle.Vol
 		}
 	}
 
-	glog.V(0).Infof("serversWithVolumes: %v", serversWithVolumes)
+	//glog.V(0).Infof("serversWithVolumes: %v", serversWithVolumes)
 
 	keys := make([]string, 0, len(serversWithVolumes))
 	for k := range serversWithVolumes {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	glog.V(0).Infof("keys: %v", keys)
+	//glog.V(0).Infof("keys: %v", keys)
 
 	var combinations = make([][]uint32, len(serversWithVolumes))
 	for i, key := range keys {
 		combinations[i] = serversWithVolumes[key]
 	}
-	glog.V(0).Infof("combinations: %v", combinations)
+	//glog.V(0).Infof("combinations: %v", combinations)
 	volumeCombinations := getCombination(combinations...)
 
 	maxCount := 0

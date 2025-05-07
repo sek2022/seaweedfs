@@ -328,6 +328,10 @@ func (mc *MasterClient) tryConnectToMaster(ctx context.Context, master pb.Server
 	return
 }
 
+func (mc *MasterClient) TryResetVidMap() {
+	mc.resetVidMap()
+}
+
 func (mc *MasterClient) updateVidMap(resp *master_pb.KeepConnectedResponse) {
 	if resp.VolumeLocation.IsEmptyUrl() {
 		glog.V(0).Infof("updateVidMap ignore short heartbeat: %+v", resp)
