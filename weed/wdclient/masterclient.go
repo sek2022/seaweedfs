@@ -330,6 +330,7 @@ func (mc *MasterClient) tryConnectToMaster(ctx context.Context, master pb.Server
 
 func (mc *MasterClient) TryClearEcVidMap(vid uint32) {
 	//mc.resetVidMap()
+	glog.V(0).Infof("TryClearEcVidMap, vid: %d, ecVid2Locations: %v, vid2Locations: %v", vid, mc.vidMap.ecVid2Locations[vid], mc.vidMap.vid2Locations[vid])
 	mc.vidMap.ecVid2Locations[vid] = make([]Location, 0)
 	mc.vidMap.cache.ecVid2Locations[vid] = make([]Location, 0)
 }

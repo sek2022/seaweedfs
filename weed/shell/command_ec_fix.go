@@ -175,6 +175,9 @@ func fixEcVolumeIssues(commandEnv *CommandEnv, topoInfo *master_pb.TopologyInfo,
 		if err != nil {
 			fmt.Fprintf(writer, "  修复服务器 %s 上卷 %d 的EC分片失败: %v\n", serverAddr, vid, err)
 		} else {
+			// 重置vidMap, 清除缓存 避免数据中心变更后，vidMap不更新
+			commandEnv.MasterClient.TryClearEcVidMap(uint32(vid))
+
 			fmt.Fprintf(writer, "  已成功修复服务器 %s 上卷 %d 的 %d 个EC分片\n", serverAddr, vid, len(shards))
 			fixedCount += len(shards)
 		}
@@ -303,8 +306,6 @@ func applyEcFix(commandEnv *CommandEnv, serverAddr pb.ServerAddress, collection 
 	if err2 != nil {
 		return fmt.Errorf("mountVolumeAndDeleteEcShards delete ec volume %d on %s: %v", vid, serverAddr, err2)
 	}
-	// 重置vidMap, 清除缓存 避免数据中心变更后，vidMap不更新
-	commandEnv.MasterClient.TryClearEcVidMap(uint32(vid))
 
 	return nil
 }
