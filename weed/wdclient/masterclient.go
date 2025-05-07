@@ -328,8 +328,10 @@ func (mc *MasterClient) tryConnectToMaster(ctx context.Context, master pb.Server
 	return
 }
 
-func (mc *MasterClient) TryResetVidMap() {
-	mc.resetVidMap()
+func (mc *MasterClient) TryClearEcVidMap(vid uint32) {
+	//mc.resetVidMap()
+	mc.vidMap.ecVid2Locations[vid] = make([]Location, 0)
+	mc.vidMap.cache.ecVid2Locations[vid] = make([]Location, 0)
 }
 
 func (mc *MasterClient) updateVidMap(resp *master_pb.KeepConnectedResponse) {

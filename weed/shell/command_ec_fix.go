@@ -304,7 +304,7 @@ func applyEcFix(commandEnv *CommandEnv, serverAddr pb.ServerAddress, collection 
 		return fmt.Errorf("mountVolumeAndDeleteEcShards delete ec volume %d on %s: %v", vid, serverAddr, err2)
 	}
 	// 重置vidMap, 清除缓存 避免数据中心变更后，vidMap不更新
-	commandEnv.MasterClient.TryResetVidMap()
+	commandEnv.MasterClient.TryClearEcVidMap(uint32(vid))
 
 	return nil
 }
