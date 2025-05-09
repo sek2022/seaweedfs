@@ -36,8 +36,11 @@ func (c *commandEcBalance) Do(args []string, commandEnv *CommandEnv, writer io.W
 	collection := balanceCommand.String("collection", "EACH_COLLECTION", "collection name, or \"EACH_COLLECTION\" for each collection")
 	dc := balanceCommand.String("dataCenter", "", "only apply the balancing for this dataCenter")
 	shardReplicaPlacement := balanceCommand.String("shardReplicaPlacement", "", "replica placement for EC shards, or master default if empty")
+	maxParallelization := balanceCommand.Int("maxParallelization", 10, "run up to X tasks in parallel, whenever possible")
+
 	applyBalancing := balanceCommand.Bool("force", false, "apply the balancing plan")
 	maxMoveShards := balanceCommand.Int("maxMoveShards", 0, "maximum number of shards to move in one operation, 0 means no limit")
+
 	if err = balanceCommand.Parse(args); err != nil {
 		return nil
 	}
@@ -63,5 +66,5 @@ func (c *commandEcBalance) Do(args []string, commandEnv *CommandEnv, writer io.W
 		return err
 	}
 
-	return EcBalance(commandEnv, collections, *dc, rp, *applyBalancing, *maxMoveShards)
+	return EcBalance(commandEnv, collections, *dc, rp, *applyBalancing, *maxMoveShards, *maxParallelization)
 }

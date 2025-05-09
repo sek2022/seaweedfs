@@ -159,6 +159,53 @@ var (
 	ecBusyServerProcessor = NewEcBusyServerProcessor()
 )
 
+type ErrorWaitGroup struct {
+	maxConcurrency int
+	wg             *sync.WaitGroup
+	wgSem          chan bool
+	errors         []error
+	errorsMu       sync.Mutex
+}
+type ErrorWaitGroupTask func() error
+
+func NewErrorWaitGroup(maxConcurrency int) *ErrorWaitGroup {
+	if maxConcurrency <= 0 {
+		// No concurrency = one task at the time
+		maxConcurrency = 1
+	}
+	return &ErrorWaitGroup{
+		maxConcurrency: maxConcurrency,
+		wg:             &sync.WaitGroup{},
+		wgSem:          make(chan bool, maxConcurrency),
+	}
+}
+
+func (ewg *ErrorWaitGroup) Add(f ErrorWaitGroupTask) {
+	if ewg.maxConcurrency <= 1 {
+		// Keep run order deterministic when parallelization is off
+		ewg.errors = append(ewg.errors, f())
+		return
+	}
+
+	ewg.wg.Add(1)
+	go func() {
+		ewg.wgSem <- true
+
+		err := f()
+		ewg.errorsMu.Lock()
+		ewg.errors = append(ewg.errors, err)
+		ewg.errorsMu.Unlock()
+
+		<-ewg.wgSem
+		ewg.wg.Done()
+	}()
+}
+
+func (ewg *ErrorWaitGroup) Wait() error {
+	ewg.wg.Wait()
+	return errors.Join(ewg.errors...)
+}
+
 func _getDefaultReplicaPlacement(commandEnv *CommandEnv) (*super_block.ReplicaPlacement, error) {
 	var resp *master_pb.GetMasterConfigurationResponse
 	var err error
@@ -623,11 +670,17 @@ func groupBy(data []*EcNode, identifierFn func(*EcNode) (id string)) map[string]
 }
 
 type ecBalancer struct {
-	commandEnv       *CommandEnv
-	ecNodes          []*EcNode
-	replicaPlacement *super_block.ReplicaPlacement
-	applyBalancing   bool
-	maxMoveShards    int // 最大移动分片数量限制
+	commandEnv         *CommandEnv
+	ecNodes            []*EcNode
+	replicaPlacement   *super_block.ReplicaPlacement
+	applyBalancing     bool
+	maxMoveShards      int        // 最大移动分片数量限制
+	maxParallelization int        // 最大并行任务数量限制
+	movedShardsLock    sync.Mutex // 添加互斥锁来保护 movedShards
+}
+
+func (ecb *ecBalancer) errorWaitGroup() *ErrorWaitGroup {
+	return NewErrorWaitGroup(ecb.maxParallelization)
 }
 
 func (ecb *ecBalancer) racks() map[RackId]*EcRack {
@@ -646,7 +699,7 @@ func (ecb *ecBalancer) racks() map[RackId]*EcRack {
 
 func (ecb *ecBalancer) balanceEcVolumes(collection string) error {
 
-	fmt.Printf("balanceEcVolumes 33 %s\n", collection)
+	fmt.Printf("balanceEcVolumes %s, maxParallelization: %d, maxMoveShards: %d\n", collection, ecb.maxParallelization, ecb.maxMoveShards)
 
 	// 跟踪已移动的分片数量
 	movedShards := 0
@@ -764,7 +817,7 @@ func (ecb *ecBalancer) doBalanceEcShardsAcrossRacks(collection string, vid needl
 	}
 
 	for shardId, ecNode := range ecShardsToMove {
-		rackId, err := ecb.pickRackToBalanceShardsInto(racks, rackToShardCount)
+		rackId, err := ecb.pickRackToBalanceShardsInto(racks, rackToShardCount, averageShardsPerEcRack)
 		if err != nil {
 			fmt.Printf("ec shard %d.%d at %s can not find a destination rack:\n%s\n", vid, shardId, ecNode.info.Id, err.Error())
 			continue
@@ -787,7 +840,7 @@ func (ecb *ecBalancer) doBalanceEcShardsAcrossRacks(collection string, vid needl
 	return nil
 }
 
-func (ecb *ecBalancer) pickRackToBalanceShardsInto(rackToEcNodes map[RackId]*EcRack, rackToShardCount map[string]int) (RackId, error) {
+func (ecb *ecBalancer) pickRackToBalanceShardsInto(rackToEcNodes map[RackId]*EcRack, rackToShardCount map[string]int, averageShardsPerEcRack int) (RackId, error) {
 	targets := []RackId{}
 	targetShards := -1
 	for _, shards := range rackToShardCount {
@@ -804,8 +857,10 @@ func (ecb *ecBalancer) pickRackToBalanceShardsInto(rackToEcNodes map[RackId]*EcR
 			details += fmt.Sprintf("  Skipped %s because it has no free slots\n", rackId)
 			continue
 		}
-		if ecb.replicaPlacement != nil && shards > ecb.replicaPlacement.DiffRackCount {
-			details += fmt.Sprintf("  Skipped %s because shards %d >= replica placement limit for other racks (%d), rp:%v\n", rackId, shards, ecb.replicaPlacement.DiffRackCount, ecb.replicaPlacement)
+
+		//fmt.Printf("rack %s has %d shards, diffRackCount: %d\n", rackId, shards, ecb.replicaPlacement.DiffRackCount)
+		if ecb.replicaPlacement != nil && shards > ecb.replicaPlacement.DiffRackCount && shards >= averageShardsPerEcRack {
+			details += fmt.Sprintf("  Skipped %s because shards %d >= replica placement limit for other racks (%d)\n", rackId, shards, ecb.replicaPlacement.DiffRackCount)
 			continue
 		}
 
@@ -964,6 +1019,12 @@ func (ecb *ecBalancer) doBalanceEcRack(ecRack *EcRack) error {
 	return nil
 }
 
+func (ecb *ecBalancer) getAverageShardsPerEcRack() int {
+	racks := ecb.racks()
+	// calculate average number of shards an ec rack should have for one volume
+	averageShardsPerEcRack := ceilDivide(erasure_coding.TotalShardsCount, len(racks))
+	return averageShardsPerEcRack
+}
 func (ecb *ecBalancer) pickEcNodeToBalanceShardsInto(vid needle.VolumeId, existingLocation *EcNode, possibleDestinations []*EcNode) (*EcNode, error) {
 	if existingLocation == nil {
 		return nil, fmt.Errorf("INTERNAL: missing source nodes")
@@ -974,7 +1035,9 @@ func (ecb *ecBalancer) pickEcNodeToBalanceShardsInto(vid needle.VolumeId, existi
 
 	nodeShards := map[*EcNode]int{}
 	for _, node := range possibleDestinations {
-		nodeShards[node] = findEcVolumeShards(node, vid).ShardIdCount()
+		vs := findEcVolumeShards(node, vid)
+		nodeShards[node] = vs.ShardIdCount()
+		//fmt.Printf("+++ vid: %d, node: %s, shards: %d, vs: %v，info: %v\n", vid, node.info.Id, nodeShards[node], vs, node.info.DiskInfos)
 	}
 
 	targets := []*EcNode{}
@@ -985,6 +1048,8 @@ func (ecb *ecBalancer) pickEcNodeToBalanceShardsInto(vid needle.VolumeId, existi
 		}
 	}
 
+	//fmt.Printf("+++ nodeShards: %v \n", nodeShards)
+	averageShardsPerEcRack := ecb.getAverageShardsPerEcRack()
 	details := ""
 	for _, node := range possibleDestinations {
 		if node.info.Id == existingLocation.info.Id {
@@ -996,7 +1061,7 @@ func (ecb *ecBalancer) pickEcNodeToBalanceShardsInto(vid needle.VolumeId, existi
 		}
 
 		shards := nodeShards[node]
-		if ecb.replicaPlacement != nil && shards > ecb.replicaPlacement.SameRackCount {
+		if ecb.replicaPlacement != nil && shards > ecb.replicaPlacement.SameRackCount && shards >= averageShardsPerEcRack {
 			details += fmt.Sprintf("  Skipped %s because shards %d > replica placement limit for the rack (%d), rp:%v \n", node.info.Id, shards, ecb.replicaPlacement.SameRackCount, ecb.replicaPlacement)
 			continue
 		}
@@ -1085,7 +1150,7 @@ func (ecb *ecBalancer) collectVolumeIdToEcNodes(collection string) map[needle.Vo
 	return vidLocations
 }
 
-func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplicaPlacement *super_block.ReplicaPlacement, applyBalancing bool, maxMoveShards int) (err error) {
+func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplicaPlacement *super_block.ReplicaPlacement, applyBalancing bool, maxMoveShards int, maxParallelization int) (err error) {
 	if len(collections) == 0 {
 		return fmt.Errorf("no collections to balance")
 	}
@@ -1100,11 +1165,12 @@ func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplic
 	}
 
 	ecb := &ecBalancer{
-		commandEnv:       commandEnv,
-		ecNodes:          allEcNodes,
-		replicaPlacement: ecReplicaPlacement,
-		applyBalancing:   applyBalancing,
-		maxMoveShards:    maxMoveShards,
+		commandEnv:         commandEnv,
+		ecNodes:            allEcNodes,
+		replicaPlacement:   ecReplicaPlacement,
+		applyBalancing:     applyBalancing,
+		maxMoveShards:      maxMoveShards,
+		maxParallelization: maxParallelization,
 	}
 
 	for _, c := range collections {
@@ -1123,17 +1189,32 @@ func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplic
 func (ecb *ecBalancer) balanceEcShardsAcrossRacksWithLimit(collection string, movedShards *int) error {
 	// collect vid => []ecNode, since previous steps can change the locations
 	vidLocations := ecb.collectVolumeIdToEcNodes(collection)
+
+	// spread the ec shards evenly
+	ewg := ecb.errorWaitGroup()
 	// spread the ec shards evenly
 	for vid, locations := range vidLocations {
-		if err := ecb.doBalanceEcShardsAcrossRacksWithLimit(collection, vid, locations, movedShards); err != nil {
-			return err
-		}
-
-		// 检查是否达到最大移动分片数量限制
-		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+		ewg.Add(func() error {
+			if err := ecb.doBalanceEcShardsAcrossRacksWithLimit(collection, vid, locations, movedShards); err != nil {
+				return err
+			}
 			return nil
-		}
+		})
+
+		// if err := ecb.doBalanceEcShardsAcrossRacksWithLimit(collection, vid, locations, movedShards); err != nil {
+		// 	return err
+		// }
+
 	}
+	err := ewg.Wait()
+	if err != nil {
+		return err
+	}
+	// 检查是否达到最大移动分片数量限制
+	if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+		return nil
+	}
+
 	return nil
 }
 
@@ -1165,11 +1246,11 @@ func (ecb *ecBalancer) doBalanceEcShardsAcrossRacksWithLimit(collection string, 
 
 	for shardId, ecNode := range ecShardsToMove {
 		// 检查是否达到最大移动分片数量限制
-		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
-			return nil
-		}
+		// if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+		// 	return nil
+		// }
 
-		rackId, err := ecb.pickRackToBalanceShardsInto(racks, rackToShardCount)
+		rackId, err := ecb.pickRackToBalanceShardsInto(racks, rackToShardCount, averageShardsPerEcRack)
 		if err != nil {
 			fmt.Printf("ec shard %d.%d at %s can not find a destination rack:\n%s\n", vid, shardId, ecNode.info.Id, err.Error())
 			continue
@@ -1279,8 +1360,10 @@ func (ecb *ecBalancer) pickOneEcNodeAndMoveShard(existingLocation *EcNode, colle
 	fmt.Printf("%s moves ec shard %d.%d to %s\n", existingLocation.info.Id, vid, shardId, destNode.info.Id)
 	err = moveMountedShardToEcNode(ecb.commandEnv, existingLocation, collection, vid, shardId, destNode, ecb.applyBalancing)
 	if err == nil && ecb.applyBalancing {
+		ecb.movedShardsLock.Lock()
 		*movedShards++
 		fmt.Printf("已移动 %d 个分片，限制为 %d\n", *movedShards, ecb.maxMoveShards)
+		ecb.movedShardsLock.Unlock()
 	}
 	return err
 }
