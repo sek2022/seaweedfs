@@ -243,6 +243,13 @@ func Test_ceilDivide(t *testing.T) {
 
 	//2
 	ast.Equal(2, ceilDivide(14, 7))
+
+	//2
+	ast.Equal(1, ceilDivide(14, 14))
+
+	ast.Equal(1, ceilDivide(14, 15))
+
+	ast.Equal(1, ceilDivide(14, 28))
 }
 
 func Test_VolumeIdSort(t *testing.T) {

@@ -940,12 +940,13 @@ func (ecb *ecBalancer) doBalanceEcShardsWithinOneRack(averageShardsPerEcNode int
 
 func (ecb *ecBalancer) balanceEcRacks() error {
 	// balance one rack for all ec shards
+	ewg := ecb.errorWaitGroup()
 	for _, ecRack := range ecb.racks() {
-		if err := ecb.doBalanceEcRack(ecRack); err != nil {
-			return err
-		}
+		ewg.Add(func() error {
+			return ecb.doBalanceEcRack(ecRack)
+		})
 	}
-	return nil
+	return ewg.Wait()
 }
 
 func (ecb *ecBalancer) doBalanceEcRack(ecRack *EcRack) error {
@@ -1172,12 +1173,13 @@ func EcBalance(commandEnv *CommandEnv, collections []string, dc string, ecReplic
 		maxMoveShards:      maxMoveShards,
 		maxParallelization: maxParallelization,
 	}
-
+	glog.V(0).Infof("start ec balancing with maxMoveShards: %d, maxParallelization: %d", ecb.maxMoveShards, ecb.maxParallelization)
 	for _, c := range collections {
 		if err = ecb.balanceEcVolumes(c); err != nil {
 			return err
 		}
 	}
+	glog.V(0).Infof("start balanceEcRacks")
 	if err := ecb.balanceEcRacks(); err != nil {
 		return fmt.Errorf("balance ec racks: %v", err)
 	}
@@ -1235,6 +1237,28 @@ func (ecb *ecBalancer) doBalanceEcShardsAcrossRacksWithLimit(collection string, 
 		}
 		possibleEcNodes := rackEcNodesWithVid[rackId]
 		for shardId, ecNode := range pickNEcShardsToMoveFrom(possibleEcNodes, vid, count-averageShardsPerEcRack) {
+			ecShardsToMove[shardId] = ecNode
+		}
+	}
+	// 如果 ecShardsToMove 为空，则检查是否存在不平衡的机架
+	if len(ecShardsToMove) == 0 {
+		excessiveRacks, minFreeSlotsRackId, err := ecb.findRacksWithExcessiveUsedSlots()
+		if err != nil {
+			// 处理错误
+			return err
+		}
+		if len(excessiveRacks) <= 0 {
+			// 所有机架的可用槽位分布相对均衡
+			//fmt.Println("所有机架的可用槽位分布均衡")
+			return nil
+		}
+		// 如果存在不平衡的机架，则将 ecShardsToMove 设置为不平衡的机架
+		for rackId, freeSlots := range excessiveRacks {
+			fmt.Printf("机架 %s 的可用槽位数量 %d 超过平均值 15%%\n", rackId, freeSlots)
+		}
+
+		possibleEcNodes := rackEcNodesWithVid[minFreeSlotsRackId]
+		for shardId, ecNode := range pickNEcShardsToMoveFrom(possibleEcNodes, vid, 1) {
 			ecShardsToMove[shardId] = ecNode
 		}
 	}
@@ -1364,4 +1388,56 @@ func (ecb *ecBalancer) pickOneEcNodeAndMoveShard(existingLocation *EcNode, colle
 		ecb.movedShardsLock.Unlock()
 	}
 	return err
+}
+
+// findRacksWithExcessiveUsedSlots 检查是否存在机架的已使用 slot 比其他机架少 15% 或以上
+func (ecb *ecBalancer) findRacksWithExcessiveUsedSlots() (map[RackId]int, string, error) {
+	racks := ecb.racks()
+	if len(racks) == 0 {
+		return nil, "", fmt.Errorf("no racks available")
+	}
+
+	// 计算所有机架的总 slot 数和已使用的 slot 数
+	var totalSlots int
+	var totalUsedSlots int
+	rackUsedSlots := make(map[RackId]int)
+
+	for rackId, rack := range racks {
+		// 计算该机架已使用的 slot 数
+		usedSlots := 0
+		for _, node := range rack.ecNodes {
+			if diskInfo, found := node.info.DiskInfos[string(types.HardDriveType)]; found {
+				for _, shardInfo := range diskInfo.EcShardInfos {
+					shardBits := erasure_coding.ShardBits(shardInfo.EcIndexBits)
+					usedSlots += shardBits.ShardIdCount()
+				}
+			}
+		}
+		rackTotalSlots := usedSlots + rack.freeEcSlot
+		totalSlots += rackTotalSlots
+		rackUsedSlots[rackId] = usedSlots
+		totalUsedSlots += usedSlots
+	}
+
+	// 计算平均使用率
+	averageUsedSlots := float64(totalUsedSlots) / float64(len(racks))
+	threshold := averageUsedSlots * 0.85 // 15% 阈值
+
+	// 找出使用率低于平均值 15% 的机架
+	excessiveRacks := make(map[RackId]int)
+	var maxUsedSlots int = -1
+	var maxUsedSlotsRackId string
+
+	for rackId, usedSlots := range rackUsedSlots {
+		if float64(usedSlots) <= threshold {
+			excessiveRacks[rackId] = usedSlots
+		}
+		// 找出使用率最高的机架
+		if maxUsedSlots == -1 || usedSlots > maxUsedSlots {
+			maxUsedSlots = usedSlots
+			maxUsedSlotsRackId = string(rackId)
+		}
+	}
+
+	return excessiveRacks, maxUsedSlotsRackId, nil
 }
