@@ -1200,11 +1200,6 @@ func (ecb *ecBalancer) balanceEcShardsAcrossRacksWithLimit(collection string, mo
 			}
 			return nil
 		})
-
-		// if err := ecb.doBalanceEcShardsAcrossRacksWithLimit(collection, vid, locations, movedShards); err != nil {
-		// 	return err
-		// }
-
 	}
 	err := ewg.Wait()
 	if err != nil {
@@ -1280,6 +1275,8 @@ func (ecb *ecBalancer) balanceEcShardsWithinRacksWithLimit(collection string, mo
 	racks := ecb.racks()
 
 	// spread the ec shards evenly
+	ewg := ecb.errorWaitGroup()
+	// spread the ec shards evenly
 	for vid, locations := range vidLocations {
 		// 检查是否达到最大移动分片数量限制
 		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
@@ -1306,12 +1303,13 @@ func (ecb *ecBalancer) balanceEcShardsWithinRacksWithLimit(collection string, mo
 			}
 			sourceEcNodes := rackEcNodesWithVid[rackId]
 			averageShardsPerEcNode := ceilDivide(rackToShardCount[rackId], len(possibleDestinationEcNodes))
-			if err := ecb.doBalanceEcShardsWithinOneRackWithLimit(averageShardsPerEcNode, collection, vid, sourceEcNodes, possibleDestinationEcNodes, movedShards); err != nil {
-				return err
-			}
+
+			ewg.Add(func() error {
+				return ecb.doBalanceEcShardsWithinOneRackWithLimit(averageShardsPerEcNode, collection, vid, sourceEcNodes, possibleDestinationEcNodes, movedShards)
+			})
 		}
 	}
-	return nil
+	return ewg.Wait()
 }
 
 // 新增方法，支持限制移动数量的机架内分片平衡实现
