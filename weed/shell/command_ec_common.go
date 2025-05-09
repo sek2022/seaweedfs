@@ -1219,6 +1219,11 @@ func (ecb *ecBalancer) balanceEcShardsAcrossRacksWithLimit(collection string, mo
 func (ecb *ecBalancer) doBalanceEcShardsAcrossRacksWithLimit(collection string, vid needle.VolumeId, locations []*EcNode, movedShards *int) error {
 	racks := ecb.racks()
 
+	// 检查是否达到最大移动分片数量限制
+	if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+		return nil
+	}
+
 	// calculate average number of shards an ec rack should have for one volume
 	averageShardsPerEcRack := ceilDivide(erasure_coding.TotalShardsCount, len(racks))
 
