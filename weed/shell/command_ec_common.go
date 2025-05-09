@@ -1246,9 +1246,9 @@ func (ecb *ecBalancer) doBalanceEcShardsAcrossRacksWithLimit(collection string, 
 
 	for shardId, ecNode := range ecShardsToMove {
 		// 检查是否达到最大移动分片数量限制
-		// if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
-		// 	return nil
-		// }
+		if ecb.maxMoveShards > 0 && *movedShards >= ecb.maxMoveShards {
+			return nil
+		}
 
 		rackId, err := ecb.pickRackToBalanceShardsInto(racks, rackToShardCount, averageShardsPerEcRack)
 		if err != nil {
