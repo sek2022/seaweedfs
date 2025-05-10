@@ -8,7 +8,7 @@ import (
 func NewDiskStatus(path string) (disk *volume_server_pb.DiskStatus) {
 	disk = &volume_server_pb.DiskStatus{Dir: path}
 	fillInDiskStatus(disk)
-	if disk.PercentUsed > 95 {
+	if disk.PercentUsed > 98 {
 		glog.V(0).Infof("disk status: %v", disk)
 	}
 	return
