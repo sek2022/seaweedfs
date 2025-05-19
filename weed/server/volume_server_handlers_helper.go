@@ -62,7 +62,10 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 			r.length = size - r.start
 		} else {
 			i, err := strconv.ParseInt(start, 10, 64)
-			if err != nil || i > size || i < 0 {
+			// if err != nil || i > size || i < 0 {
+			// 	return nil, errors.New("invalid range 2")
+			// }
+			if err != nil || i < 0 {
 				return nil, errors.New("invalid range 2")
 			}
 			r.start = i
