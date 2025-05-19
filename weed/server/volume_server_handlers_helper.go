@@ -34,7 +34,7 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 	}
 	const b = "bytes="
 	if !strings.HasPrefix(s, b) {
-		return nil, errors.New("invalid range")
+		return nil, errors.New("invalid range: " + s)
 	}
 	var ranges []httpRange
 	for _, ra := range strings.Split(s[len(b):], ",") {

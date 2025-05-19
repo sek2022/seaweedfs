@@ -1259,7 +1259,7 @@ func (ecb *ecBalancer) doBalanceEcShardsAcrossRacksWithLimit(collection string, 
 		}
 		// 如果存在不平衡的机架，则将 ecShardsToMove 设置为不平衡的机架
 		for rackId, freeSlots := range excessiveRacks {
-			fmt.Printf("机架 %s 的可用槽位数量 %d 超过平均值 15%%\n", rackId, freeSlots)
+			fmt.Printf("机架 %s 的空闲槽位数量 %d 超过平均值 15%%\n", rackId, freeSlots)
 		}
 
 		possibleEcNodes := rackEcNodesWithVid[minFreeSlotsRackId]

@@ -334,7 +334,7 @@ func ProcessRangeRequest(r *http.Request, w http.ResponseWriter, totalSize int64
 	}
 
 	if err != nil {
-		glog.Errorf("ProcessRangeRequest headers: %+v err: %v", w.Header(), err)
+		glog.Errorf("ProcessRangeRequest headers: %+v err: %v, ecReadPart: %v", w.Header(), err, ecReadPart)
 		http.Error(w, err.Error(), http.StatusRequestedRangeNotSatisfiable)
 		return fmt.Errorf("ProcessRangeRequest header: %v", err)
 	}
