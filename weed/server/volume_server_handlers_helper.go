@@ -44,7 +44,7 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 		}
 		i := strings.Index(ra, "-")
 		if i < 0 {
-			return nil, errors.New("invalid range")
+			return nil, errors.New("invalid range 0")
 		}
 		start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
 		var r httpRange
@@ -53,7 +53,7 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 			// range start relative to the end of the file.
 			i, err := strconv.ParseInt(end, 10, 64)
 			if err != nil {
-				return nil, errors.New("invalid range")
+				return nil, errors.New("invalid range 1")
 			}
 			if i > size {
 				i = size
@@ -63,7 +63,7 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 		} else {
 			i, err := strconv.ParseInt(start, 10, 64)
 			if err != nil || i > size || i < 0 {
-				return nil, errors.New("invalid range")
+				return nil, errors.New("invalid range 2")
 			}
 			r.start = i
 			if end == "" {
@@ -72,7 +72,7 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 			} else {
 				i, err := strconv.ParseInt(end, 10, 64)
 				if err != nil || r.start > i {
-					return nil, errors.New("invalid range")
+					return nil, errors.New("invalid range 3")
 				}
 				if i >= size {
 					i = size - 1
