@@ -7,8 +7,10 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle_map"
@@ -70,10 +72,13 @@ func (c *commandVolumeFixReplication) Do(args []string, commandEnv *CommandEnv, 
 	doCheck := volFixReplicationCommand.Bool("doCheck", true, "Also check synchronization before deleting")
 	retryCount := volFixReplicationCommand.Int("retry", 5, "how many times to retry")
 	volumesPerStep := volFixReplicationCommand.Int("volumesPerStep", 0, "how many volumes to fix in one cycle")
+	concurrent := volFixReplicationCommand.Int("concurrent", 2, "number of concurrent volume fixes")
 
 	if err = volFixReplicationCommand.Parse(args); err != nil {
 		return nil
 	}
+
+	fmt.Println("concurrent", *concurrent)
 
 	commandEnv.noLock = *skipChange
 	takeAction := !*skipChange
@@ -136,7 +141,7 @@ func (c *commandVolumeFixReplication) Do(args []string, commandEnv *CommandEnv, 
 		underReplicatedVolumeIdsCount = len(underReplicatedVolumeIds)
 		if underReplicatedVolumeIdsCount > 0 {
 			// find the most underpopulated data nodes
-			fixedVolumeReplicas, err = c.fixUnderReplicatedVolumes(commandEnv, writer, takeAction, underReplicatedVolumeIds, volumeReplicas, allLocations, *retryCount, *volumesPerStep)
+			fixedVolumeReplicas, err = c.fixUnderReplicatedVolumes(commandEnv, writer, takeAction, underReplicatedVolumeIds, volumeReplicas, allLocations, *retryCount, *volumesPerStep, *concurrent)
 			if err != nil {
 				return err
 			}
@@ -275,24 +280,102 @@ func (c *commandVolumeFixReplication) deleteOneVolume(commandEnv *CommandEnv, wr
 	return nil
 }
 
-func (c *commandVolumeFixReplication) fixUnderReplicatedVolumes(commandEnv *CommandEnv, writer io.Writer, takeAction bool, underReplicatedVolumeIds []uint32, volumeReplicas map[uint32][]*VolumeReplica, allLocations []location, retryCount int, volumesPerStep int) (fixedVolumes map[string]int, err error) {
+func (c *commandVolumeFixReplication) fixUnderReplicatedVolumes(commandEnv *CommandEnv, writer io.Writer, takeAction bool, underReplicatedVolumeIds []uint32, volumeReplicas map[uint32][]*VolumeReplica, allLocations []location, retryCount int, volumesPerStep int, concurrent int) (fixedVolumes map[string]int, err error) {
 	fixedVolumes = map[string]int{}
 	if len(underReplicatedVolumeIds) > volumesPerStep && volumesPerStep > 0 {
 		underReplicatedVolumeIds = underReplicatedVolumeIds[0:volumesPerStep]
 	}
+
+	// 创建一个带缓冲的channel来存储结果
+	type result struct {
+		vid   uint32
+		err   error
+		count int
+	}
+	resultChan := make(chan result, len(underReplicatedVolumeIds))
+
+	// 创建一个WaitGroup来等待所有goroutine完成
+	var wg sync.WaitGroup
+
+	// 使用传入的并发数量参数
+	semaphore := make(chan struct{}, concurrent)
+
+	// 创建线程安全的writer
+	var writerMutex sync.Mutex
+	safeWriter := &safeWriter{
+		writer: writer,
+		mu:     &writerMutex,
+	}
+
 	for _, vid := range underReplicatedVolumeIds {
-		for i := 0; i < retryCount+1; i++ {
-			if err = c.fixOneUnderReplicatedVolume(commandEnv, writer, takeAction, volumeReplicas, vid, allLocations); err == nil {
-				if takeAction {
-					fixedVolumes[strconv.FormatUint(uint64(vid), 10)] = len(volumeReplicas[vid])
+		wg.Add(1)
+		semaphore <- struct{}{} // 获取信号量
+
+		go func(volumeId uint32) {
+			defer wg.Done()
+			defer func() { <-semaphore }() // 释放信号量
+
+			var lastErr error
+			for i := 0; i < retryCount+1; i++ {
+				// 在调用前复制需要的数据
+				replicas := make([]*VolumeReplica, len(volumeReplicas[volumeId]))
+				copy(replicas, volumeReplicas[volumeId])
+
+				locations := make([]location, len(allLocations))
+				copy(locations, allLocations)
+
+				// 创建临时的volumeReplicas map
+				tempVolumeReplicas := map[uint32][]*VolumeReplica{
+					volumeId: replicas,
 				}
-				break
-			} else {
-				fmt.Fprintf(writer, "fixing under replicated volume %d: %v\n", vid, err)
+
+				err := c.fixOneUnderReplicatedVolume(commandEnv, safeWriter, takeAction, tempVolumeReplicas, volumeId, locations)
+				if err == nil {
+					resultChan <- result{
+						vid:   volumeId,
+						err:   nil,
+						count: len(replicas),
+					}
+					return
+				} else {
+					lastErr = err
+					safeWriter.Write([]byte(fmt.Sprintf("fixing under replicated volume %d: %v\n", volumeId, err)))
+				}
 			}
+			resultChan <- result{
+				vid:   volumeId,
+				err:   lastErr,
+				count: 0,
+			}
+		}(vid)
+	}
+
+	// 启动一个goroutine来等待所有任务完成并关闭channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// 收集结果
+	for result := range resultChan {
+		if result.err == nil && takeAction {
+			fixedVolumes[strconv.FormatUint(uint64(result.vid), 10)] = result.count
 		}
 	}
+
 	return fixedVolumes, nil
+}
+
+// 线程安全的writer
+type safeWriter struct {
+	writer io.Writer
+	mu     *sync.Mutex
+}
+
+func (w *safeWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.Write(p)
 }
 
 func (c *commandVolumeFixReplication) fixOneUnderReplicatedVolume(commandEnv *CommandEnv, writer io.Writer, takeAction bool, volumeReplicas map[uint32][]*VolumeReplica, vid uint32, allLocations []location) error {
@@ -320,7 +403,7 @@ func (c *commandVolumeFixReplication) fixOneUnderReplicatedVolume(commandEnv *Co
 
 			// ask the volume server to replicate the volume
 			foundNewLocation = true
-			fmt.Fprintf(writer, "replicating volume %d %s from %s to dataNode %s ...\n", replica.info.Id, replicaPlacement, replica.location.dataNode.Id, dst.dataNode.Id)
+			glog.V(0).Infof("replicating volume %d %s from %s to dataNode %s ...\n", replica.info.Id, replicaPlacement, replica.location.dataNode.Id, dst.dataNode.Id)
 
 			if !takeAction {
 				// adjust volume count
