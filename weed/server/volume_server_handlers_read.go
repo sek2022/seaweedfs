@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -452,8 +453,109 @@ func (vs *VolumeServer) streamWriteResponseContent(filename string, mimeType str
 
 	ProcessRangeRequest(r, w, totalSize, mimeType, readOption, func(offset int64, size int64) (filer.DoStreamContent, error) {
 		return func(writer io.Writer) error {
-			return vs.store.ReadVolumeNeedleDataInto(volumeId, n, readOption, writer, offset, size)
+			err := vs.store.ReadVolumeNeedleDataInto(volumeId, n, readOption, writer, offset, size)
+			if err != nil && strings.Contains(strings.ToLower(err.Error()), "input/output error") {
+				// Check if disk is damaged
+				if diskDamaged := vs.checkVolumeDiskHealth(volumeId); diskDamaged {
+					glog.Errorf("disk damage detected for volume %d, shutting down volume server", volumeId)
+					go func() {
+						// Shutdown in a goroutine to avoid blocking the response
+						time.Sleep(1 * time.Second) // Give time for error response
+						vs.Shutdown()
+						os.Exit(1) // Force exit if shutdown doesn't work
+					}()
+				}
+			}
+			return err
 		}, nil
 	})
+}
+
+// checkVolumeDiskHealth checks if the disk containing the volume is damaged
+func (vs *VolumeServer) checkVolumeDiskHealth(volumeId needle.VolumeId) bool {
+	// Check if already checking, if so, skip this check
+	vs.diskHealthCheckMutex.Lock()
+	if vs.isDiskHealthChecking {
+		vs.diskHealthCheckMutex.Unlock()
+		return false // Skip check if already in progress
+	}
+	vs.isDiskHealthChecking = true
+	vs.diskHealthCheckMutex.Unlock()
+
+	// Ensure we clear the flag when done
+	defer func() {
+		vs.diskHealthCheckMutex.Lock()
+		vs.isDiskHealthChecking = false
+		vs.diskHealthCheckMutex.Unlock()
+	}()
+
+	// Find the location containing this volume
+	var location *storage.DiskLocation
+	for _, loc := range vs.store.Locations {
+		if _, found := loc.FindVolume(volumeId); found {
+			location = loc
+			break
+		}
+	}
+
+	if location == nil {
+		glog.Warningf("volume %d not found in any location", volumeId)
+		return false
+	}
+
+	// Test disk health by trying to create, write, read, and delete a test file
+	testFileName := filepath.Join(location.Directory, ".disk_health_test")
+	testData := []byte("disk_health_test")
+
+	// Try to write a test file
+	testFile, err := os.Create(testFileName)
+	if err != nil {
+		glog.Errorf("failed to create test file on disk %s: %v", location.Directory, err)
+		return true // Disk is likely damaged if we can't create a file
+	}
+
+	// Try to write
+	_, err = testFile.Write(testData)
+	if err != nil {
+		testFile.Close()
+		os.Remove(testFileName)
+		glog.Errorf("failed to write test file on disk %s: %v", location.Directory, err)
+		return true // Disk is likely damaged
+	}
+
+	// Sync to ensure data is written
+	err = testFile.Sync()
+	if err != nil {
+		testFile.Close()
+		os.Remove(testFileName)
+		glog.Errorf("failed to sync test file on disk %s: %v", location.Directory, err)
+		return true // Disk is likely damaged
+	}
+
+	testFile.Close()
+
+	// Try to read back
+	readData, err := os.ReadFile(testFileName)
+	if err != nil {
+		os.Remove(testFileName)
+		glog.Errorf("failed to read test file on disk %s: %v", location.Directory, err)
+		return true // Disk is likely damaged
+	}
+
+	// Verify data
+	if string(readData) != string(testData) {
+		os.Remove(testFileName)
+		glog.Errorf("test file data mismatch on disk %s", location.Directory)
+		return true // Disk is likely damaged
+	}
+
+	// Clean up
+	err = os.Remove(testFileName)
+	if err != nil {
+		glog.Warningf("failed to remove test file on disk %s: %v", location.Directory, err)
+		// Don't consider this as disk damage, just a cleanup issue
+	}
+
+	return false // Disk appears to be healthy
 
 }

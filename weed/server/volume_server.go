@@ -52,6 +52,8 @@ type VolumeServer struct {
 	isHeartbeating          bool
 	stopChan                chan bool
 	isECoding               bool
+	diskHealthCheckMutex    sync.Mutex
+	isDiskHealthChecking    bool
 }
 
 func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
