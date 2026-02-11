@@ -19,14 +19,17 @@ import (
 )
 
 const (
-	DataShardsCount             = 10
-	ParityShardsCount           = 4
-	TotalShardsCount            = DataShardsCount + ParityShardsCount
-	ErasureCodingLargeBlockSize = 1024 * 1024 * 1024 // 1GB
-	ErasureCodingSmallBlockSize = 1024 * 1024
-	LargestBufferSize           = 8 * 1024 * 1024 // 8MB
-	MediumBufferSize            = 1024 * 1024     // 1MB
-	SmallBufferSize             = 256 * 1024
+	DataShardsCount              = 10
+	ParityShardsCount            = 4
+	TotalShardsCount             = DataShardsCount + ParityShardsCount
+	ErasureCodingLargeBlockSize  = 1024 * 1024 * 1024 // 1GB
+	ErasureCodingSmallBlockSize  = 1024 * 1024
+	LargestBufferSize            = 8 * 1024 * 1024 // 8MB
+	MediumBufferSize             = 1024 * 1024     // 1MB
+	SmallBufferSize              = 256 * 1024
+	EcRebuildTempDir             = "/tmp/seaweedfs/ecs"
+	EcRebuildTempDirMinFreeSpace = 70 * 1024 * 1024 * 1024 // 70GB
+	EcRebuildUseTempDir          = true                    // Enable temp directory for faster EC rebuild
 	//DiskReadLimit               = 100 //100M/s
 )
 

@@ -3,7 +3,6 @@ package weed_server
 import (
 	"context"
 	"fmt"
-	"google.golang.org/grpc"
 	"io"
 	"math"
 	"os"
@@ -12,10 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/operation"
 	"github.com/seaweedfs/seaweedfs/weed/pb"
 	"github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb"
+	"github.com/seaweedfs/seaweedfs/weed/stats"
 	"github.com/seaweedfs/seaweedfs/weed/storage"
 	"github.com/seaweedfs/seaweedfs/weed/storage/erasure_coding"
 	"github.com/seaweedfs/seaweedfs/weed/storage/needle"
@@ -185,35 +187,97 @@ func (vs *VolumeServer) VolumeEcShardsRebuild(ctx context.Context, req *volume_s
 
 	baseFileName := erasure_coding.EcShardBaseFileName(req.Collection, int(req.VolumeId))
 
+	// Check if files exist in temp directory (SSD) for faster rebuild
+	tempDir := fmt.Sprintf("%s/%d", erasure_coding.EcRebuildTempDir, req.VolumeId)
+	tempBaseFileName := path.Join(tempDir, baseFileName)
+
+	// Check file integrity in temp directory, similar to checkEcVolumeStatus
+	_, _, existingShardCount, err := checkEcTempDirStatus(baseFileName, tempDir)
+	if err != nil {
+		glog.V(0).Infof("failed to check temp directory status: %v", err)
+		existingShardCount = 0
+	}
+	hasTempFiles := existingShardCount > 0
+
 	var rebuiltShardIds []uint32
 
-	for _, location := range vs.store.Locations {
-		_, _, existingShardCount, err := checkEcVolumeStatus(baseFileName, location)
+	if hasTempFiles {
+		// Rebuild directly in temp directory (SSD) for faster I/O
+		glog.V(0).Infof("rebuilding EC shards in temp directory %s", tempDir)
+		var sourceLocation *storage.DiskLocation
+		for _, loc := range vs.store.Locations {
+			sourceLocation = loc
+		}
+
+		if sourceLocation != nil {
+			// Copy existing EC files from local location to temp directory
+			if err := copyFilesFromLocationToTempDir(sourceLocation, baseFileName, tempDir); err != nil {
+				glog.Warningf("failed to copy files from location to temp dir: %v, will use normal rebuild", err)
+			}
+		}
+
+		_, _, _, err := checkEcTempDirStatus(baseFileName, tempDir)
 		if err != nil {
-			return nil, err
+			glog.V(0).Infof("failed to check temp directory status: %v", err)
+			return nil, fmt.Errorf("failed to check temp directory status: %v", err)
 		}
 
-		if existingShardCount == 0 {
-			continue
+		if generatedShardIds, err := erasure_coding.RebuildEcFiles(tempBaseFileName); err != nil {
+			return nil, fmt.Errorf("RebuildEcFiles in temp dir %s: %v", tempBaseFileName, err)
+		} else {
+			rebuiltShardIds = generatedShardIds
 		}
 
-		if util.FileExists(path.Join(location.IdxDirectory, baseFileName+".ecx")) {
-			// write .ec00 ~ .ec13 files
-			dataBaseFileName := path.Join(location.Directory, baseFileName)
-			if generatedShardIds, err := erasure_coding.RebuildEcFiles(dataBaseFileName); err != nil {
-				return nil, fmt.Errorf("RebuildEcFiles %s: %v", dataBaseFileName, err)
-			} else {
-				rebuiltShardIds = generatedShardIds
+		//fmt.Printf("--------- rebuiltShardIds: %v\n", rebuiltShardIds)
+
+		// Rebuild ecx file if needed
+		if util.FileExists(tempBaseFileName + ".ecx") {
+			if err := erasure_coding.RebuildEcxFile(tempBaseFileName); err != nil {
+				return nil, fmt.Errorf("RebuildEcxFile in temp dir %s: %v", tempBaseFileName, err)
+			}
+		}
+
+		// Copy generated shard files and ecx file from temp directory to final location
+		if len(rebuiltShardIds) > 0 || util.FileExists(tempBaseFileName+".ecx") {
+			// Find a location to copy files to
+			if sourceLocation != nil {
+				if err := copyFilesFromTempDirToLocation(tempDir, baseFileName, sourceLocation, rebuiltShardIds); err != nil {
+					return nil, fmt.Errorf("failed to copy files from temp dir to location: %v", err)
+				}
+			}
+		}
+	} else {
+		// Normal rebuild process from final location
+		for _, loc := range vs.store.Locations {
+			_, _, existingShardCount, err := checkEcVolumeStatus(baseFileName, loc)
+			if err != nil {
+				return nil, err
 			}
 
-			indexBaseFileName := path.Join(location.IdxDirectory, baseFileName)
-			if err := erasure_coding.RebuildEcxFile(indexBaseFileName); err != nil {
-				return nil, fmt.Errorf("RebuildEcxFile %s: %v", dataBaseFileName, err)
+			if existingShardCount == 0 {
+				continue
 			}
 
-			break
+			if util.FileExists(path.Join(loc.IdxDirectory, baseFileName+".ecx")) {
+				// write .ec00 ~ .ec13 files
+				dataBaseFileName := path.Join(loc.Directory, baseFileName)
+				if generatedShardIds, err := erasure_coding.RebuildEcFiles(dataBaseFileName); err != nil {
+					return nil, fmt.Errorf("RebuildEcFiles %s: %v", dataBaseFileName, err)
+				} else {
+					rebuiltShardIds = generatedShardIds
+				}
+
+				indexBaseFileName := path.Join(loc.IdxDirectory, baseFileName)
+				if err := erasure_coding.RebuildEcxFile(indexBaseFileName); err != nil {
+					return nil, fmt.Errorf("RebuildEcxFile %s: %v", dataBaseFileName, err)
+				}
+
+				break
+			}
 		}
 	}
+
+	//fmt.Printf("-------222-- rebuiltShardIds: %v\n", rebuiltShardIds)
 
 	return &volume_server_pb.VolumeEcShardsRebuildResponse{
 		RebuiltShardIds: rebuiltShardIds,
@@ -225,25 +289,49 @@ func (vs *VolumeServer) VolumeEcShardsCopy(ctx context.Context, req *volume_serv
 
 	glog.V(0).Infof("VolumeEcShardsCopy: %v", req)
 
-	var location *storage.DiskLocation
-	if req.CopyEcxFile {
-		location = vs.store.FindFreeLocation(func(location *storage.DiskLocation) bool {
-			return location.DiskType == types.HardDriveType
-		})
-	} else {
-		location = vs.store.FindFreeLocation(func(location *storage.DiskLocation) bool {
-			//(location.FindEcVolume) This method is error, will cause location is nil, redundant judgment
-			// _, found := location.FindEcVolume(needle.VolumeId(req.VolumeId))
-			// return found
-			return true
-		})
-	}
-	if location == nil {
-		return nil, fmt.Errorf("no space left")
+	// Check if temp directory should be used and has enough free space
+	tempDir := fmt.Sprintf("%s/%d", erasure_coding.EcRebuildTempDir, req.VolumeId)
+	useTempDir := false
+
+	if erasure_coding.EcRebuildUseTempDir {
+		if err := os.MkdirAll(tempDir, 0755); err == nil {
+			diskStatus := stats.NewDiskStatus(tempDir)
+			if diskStatus.Free >= erasure_coding.EcRebuildTempDirMinFreeSpace {
+				useTempDir = true
+				//glog.V(0).Infof("using temp directory %s for faster copy (free space: %d bytes)", tempDir, diskStatus.Free)
+			} else {
+				glog.V(0).Infof("temp directory %s has insufficient free space: %d bytes (required: %d bytes), using normal location", tempDir, diskStatus.Free, erasure_coding.EcRebuildTempDirMinFreeSpace)
+			}
+		} else {
+			glog.Warningf("failed to create temp directory %s: %v, using normal location", tempDir, err)
+		}
 	}
 
-	dataBaseFileName := storage.VolumeFileName(location.Directory, req.Collection, int(req.VolumeId))
-	indexBaseFileName := storage.VolumeFileName(location.IdxDirectory, req.Collection, int(req.VolumeId))
+	var dataBaseFileName, indexBaseFileName string
+	if useTempDir {
+		// Use temp directory for base file names
+		dataBaseFileName = path.Join(tempDir, erasure_coding.EcShardBaseFileName(req.Collection, int(req.VolumeId)))
+		indexBaseFileName = path.Join(tempDir, erasure_coding.EcShardBaseFileName(req.Collection, int(req.VolumeId)))
+		glog.V(0).Infof("using temp directory %s for faster copy", tempDir)
+	} else {
+		glog.V(0).Infof("using normal location for copy")
+		// Use normal location
+		var location *storage.DiskLocation
+		if req.CopyEcxFile {
+			location = vs.store.FindFreeLocation(func(location *storage.DiskLocation) bool {
+				return location.DiskType == types.HardDriveType
+			})
+		} else {
+			location = vs.store.FindFreeLocation(func(location *storage.DiskLocation) bool {
+				return true
+			})
+		}
+		if location == nil {
+			return nil, fmt.Errorf("no space left")
+		}
+		dataBaseFileName = storage.VolumeFileName(location.Directory, req.Collection, int(req.VolumeId))
+		indexBaseFileName = storage.VolumeFileName(location.IdxDirectory, req.Collection, int(req.VolumeId))
+	}
 
 	err := operation.WithVolumeServerClient(true, pb.ServerAddress(req.SourceDataNode), vs.grpcDialOption, func(client volume_server_pb.VolumeServerClient) error {
 
@@ -292,11 +380,19 @@ func (vs *VolumeServer) VolumeEcShardsDelete(ctx context.Context, req *volume_se
 
 	glog.V(0).Infof("ec volume %s shard delete %v", bName, req.ShardIds)
 
+	// Delete from normal locations
 	for _, location := range vs.store.Locations {
 		if err := deleteEcShardIdsForEachLocation(bName, location, req.ShardIds); err != nil {
 			glog.Errorf("deleteEcShards from %s %s.%v: %v", location.Directory, bName, req.ShardIds, err)
 			return nil, err
 		}
+	}
+
+	// Delete from temp directory if exists
+	tempDir := fmt.Sprintf("%s/%d", erasure_coding.EcRebuildTempDir, req.VolumeId)
+	if err := deleteEcShardIdsFromTempDir(bName, tempDir, req.ShardIds); err != nil {
+		glog.Errorf("deleteEcShards from temp dir %s %s.%v: %v", tempDir, bName, req.ShardIds, err)
+		// Don't return error, continue with normal locations
 	}
 
 	return &volume_server_pb.VolumeEcShardsDeleteResponse{}, nil
@@ -343,6 +439,171 @@ func deleteEcShardIdsForEachLocation(bName string, location *storage.DiskLocatio
 	return nil
 }
 
+func deleteEcShardIdsFromTempDir(bName string, tempDir string, shardIds []uint32) error {
+	if !util.FileExists(tempDir) {
+		return nil
+	}
+
+	found := false
+	dataBaseFilename := path.Join(tempDir, bName)
+	indexBaseFilename := path.Join(tempDir, bName)
+
+	// Delete shard files
+	for _, shardId := range shardIds {
+		shardFileName := dataBaseFilename + erasure_coding.ToExt(int(shardId))
+		if util.FileExists(shardFileName) {
+			found = true
+			if err := os.Remove(shardFileName); err != nil {
+				return fmt.Errorf("failed to remove shard file %s: %v", shardFileName, err)
+			}
+		}
+	}
+
+	if !found {
+		return nil
+	}
+
+	// Check if there are any remaining shard files
+	hasEcxFile, _, existingShardCount, err := checkEcTempDirStatus(bName, tempDir)
+	if err != nil {
+		return err
+	}
+
+	// If no shard files remain, clean up index files
+	if hasEcxFile && existingShardCount == 0 {
+		if err := os.Remove(indexBaseFilename + ".ecx"); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove .ecx file: %v", err)
+		}
+		if err := os.Remove(indexBaseFilename + ".ecj"); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove .ecj file: %v", err)
+		}
+		if err := os.Remove(dataBaseFilename + ".vif"); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove .vif file: %v", err)
+		}
+	}
+
+	// Remove temp directory at the end
+	if err := os.RemoveAll(tempDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove temp directory %s: %v", tempDir, err)
+	}
+
+	return nil
+}
+
+func copyFilesFromLocationToTempDir(location *storage.DiskLocation, baseFileName string, tempDir string) error {
+	// Ensure temp directory exists
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory %s: %v", tempDir, err)
+	}
+
+	sourceDataBaseFileName := path.Join(location.Directory, baseFileName)
+	sourceIndexBaseFileName := path.Join(location.IdxDirectory, baseFileName)
+
+	tempDataBaseFileName := path.Join(tempDir, baseFileName)
+	tempIndexBaseFileName := path.Join(tempDir, baseFileName)
+
+	// Copy all shard files (.ec00 ~ .ec13)
+	for shardId := 0; shardId < erasure_coding.TotalShardsCount; shardId++ {
+		ext := erasure_coding.ToExt(shardId)
+		sourceFile := sourceDataBaseFileName + ext
+		tempFile := tempDataBaseFileName + ext
+
+		if util.FileExists(sourceFile) && !util.FileExists(tempFile) {
+			if err := copyFile(sourceFile, tempFile); err != nil {
+				return fmt.Errorf("failed to copy shard file %s to %s: %v", sourceFile, tempFile, err)
+			}
+		}
+	}
+
+	// Copy index files (.ecx, .ecj)
+	if util.FileExists(sourceIndexBaseFileName+".ecx") && !util.FileExists(tempIndexBaseFileName+".ecx") {
+		if err := copyFile(sourceIndexBaseFileName+".ecx", tempIndexBaseFileName+".ecx"); err != nil {
+			return fmt.Errorf("failed to copy .ecx file: %v", err)
+		}
+	}
+	if util.FileExists(sourceIndexBaseFileName+".ecj") && !util.FileExists(tempIndexBaseFileName+".ecj") {
+		if err := copyFile(sourceIndexBaseFileName+".ecj", tempIndexBaseFileName+".ecj"); err != nil {
+			return fmt.Errorf("failed to copy .ecj file: %v", err)
+		}
+	}
+
+	// Copy .vif file if exists
+	if util.FileExists(sourceDataBaseFileName+".vif") && !util.FileExists(tempDataBaseFileName+".vif") {
+		if err := copyFile(sourceDataBaseFileName+".vif", tempDataBaseFileName+".vif"); err != nil {
+			return fmt.Errorf("failed to copy .vif file: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func copyFilesFromTempDirToLocation(tempDir string, baseFileName string, location *storage.DiskLocation, generatedShardIds []uint32) error {
+	tempDataBaseFileName := path.Join(tempDir, baseFileName)
+	tempIndexBaseFileName := path.Join(tempDir, baseFileName)
+
+	finalDataBaseFileName := path.Join(location.Directory, baseFileName)
+	finalIndexBaseFileName := path.Join(location.IdxDirectory, baseFileName)
+
+	// Ensure target directories exist
+	if err := os.MkdirAll(location.Directory, 0755); err != nil {
+		return fmt.Errorf("failed to create data directory %s: %v", location.Directory, err)
+	}
+	if err := os.MkdirAll(location.IdxDirectory, 0755); err != nil {
+		return fmt.Errorf("failed to create index directory %s: %v", location.IdxDirectory, err)
+	}
+
+	// Copy generated shard files
+	for _, shardId := range generatedShardIds {
+		ext := erasure_coding.ToExt(int(shardId))
+		tempFile := tempDataBaseFileName + ext
+		finalFile := finalDataBaseFileName + ext
+
+		if util.FileExists(tempFile) {
+			if err := copyFile(tempFile, finalFile); err != nil {
+				return fmt.Errorf("failed to copy shard file %s to %s: %v", tempFile, finalFile, err)
+			}
+		}
+	}
+
+	// Copy index files (.ecx, .ecj)
+	if util.FileExists(tempIndexBaseFileName + ".ecx") {
+		if err := copyFile(tempIndexBaseFileName+".ecx", finalIndexBaseFileName+".ecx"); err != nil {
+			return fmt.Errorf("failed to copy .ecx file: %v", err)
+		}
+	}
+	if util.FileExists(tempIndexBaseFileName + ".ecj") {
+		if err := copyFile(tempIndexBaseFileName+".ecj", finalIndexBaseFileName+".ecj"); err != nil {
+			return fmt.Errorf("failed to copy .ecj file: %v", err)
+		}
+	}
+
+	// Copy .vif file if exists
+	if util.FileExists(tempDataBaseFileName + ".vif") {
+		if err := copyFile(tempDataBaseFileName+".vif", finalDataBaseFileName+".vif"); err != nil {
+			return fmt.Errorf("failed to copy .vif file: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
+}
+
 func checkEcVolumeStatus(bName string, location *storage.DiskLocation) (hasEcxFile bool, hasIdxFile bool, existingShardCount int, err error) {
 	// check whether to delete the .ecx and .ecj file also
 	fileInfos, err := os.ReadDir(location.Directory)
@@ -370,6 +631,39 @@ func checkEcVolumeStatus(bName string, location *storage.DiskLocation) (hasEcxFi
 		}
 	}
 	return hasEcxFile, hasIdxFile, existingShardCount, nil
+}
+
+func checkEcTempDirStatus(baseFileName string, tempDir string) (hasEcxFile bool, hasEcjFile bool, existingShardCount int, err error) {
+	// check file integrity in temp directory
+	fileInfos, err := os.ReadDir(tempDir)
+	if err != nil {
+		return false, false, 0, err
+	}
+
+	baseName := path.Base(baseFileName)
+	for _, fileInfo := range fileInfos {
+		if fileInfo.IsDir() {
+			continue
+		}
+		fileName := fileInfo.Name()
+
+		if fileName == baseName+".ecx" {
+			hasEcxFile = true
+			continue
+		}
+		if fileName == baseName+".ecj" {
+			hasEcjFile = true
+			continue
+		}
+		if strings.HasPrefix(fileName, baseName+".ec") {
+			// Check if file size is valid (not empty)
+			filePath := path.Join(tempDir, fileName)
+			if fileStat, statErr := os.Stat(filePath); statErr == nil && fileStat.Size() > 0 {
+				existingShardCount++
+			}
+		}
+	}
+	return hasEcxFile, hasEcjFile, existingShardCount, nil
 }
 
 func (vs *VolumeServer) VolumeEcShardsMount(ctx context.Context, req *volume_server_pb.VolumeEcShardsMountRequest) (*volume_server_pb.VolumeEcShardsMountResponse, error) {
